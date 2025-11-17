@@ -6,6 +6,33 @@ OrcaTestEngine is a deterministic, event-driven stress-testing framework designe
 
 ---
 
+## What Makes OrcaTestEngine Unique
+
+OrcaTestEngine unifies features typically spread across several separate testing tools:
+
+- Android Monkey – randomized event selection, reproducible stress patterns
+
+- Stability & Endurance Test Labs – long-duration looping, failure statistics, slow-event detection
+
+- Chaos Monkey–style fault injection – conditional triggers, controlled randomness, sequence-driven chaos events
+
+- Device orchestration frameworks – reboot detection, offline/online waits, boot-complete handling, app restart logic
+
+- Replay-based test systems – deterministic execution using a seed + RNG call tracking
+
+- Script-driven automation engines – full support for Shell, Python, Batch, PowerShell, Ruby, Node, etc.
+
+- State machine / workflow engines – requireState, setState, postEvents, conditionalTriggers, and profile-based weights
+
+This combination makes OrcaTestEngine a full orchestration layer for Android reliability testing, capable of running complex, multi-event scenarios while remaining 100% deterministic and fully configurable by JSON.
+
+Additionally, OrcaTestEngine requires no complex setup and no infrastructure beyond Android Studio.
+There are no servers, no agents, no external dependencies, and no prerequisites except ADB and a device/emulator — tools every Android developer already has.
+
+---
+
+
+
 ## 🚀 Key Features
 
 ### **Deterministic Execution**
@@ -204,8 +231,6 @@ MIT License without commercial licensing requirements.
    The Software is provided “as is,” without warranty unless otherwise
    specified in a separate commercial agreement.
 
-For commercial licensing inquiries (excluding GM), contact:
-waltercapers@gmail.com
-
+For commercial licensing inquiries (excluding GM)
 
 
