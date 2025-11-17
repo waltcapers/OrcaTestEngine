@@ -1,8 +1,8 @@
 # OrcaTestEngine  
 ### Deterministic Orchestration Framework for Android Application Stress & Reliability Testing
 
-OrcaTestEngine is a deterministic, event-driven stress testing framework for evaluating the reliability of Android applications running on ADB-connected devices or emulators.  
-All test behavior is defined through JSON configuration, enabling reproducible test runs, automation-friendly workflows, and structured post-run analysis.
+OrcaTestEngine is a deterministic, event-driven stress-testing framework designed to evaluate the reliability and edge-case behavior of Android applications running on ADB-connected devices or emulators. Every aspect of the test flow—events, retries, triggers, sequences, and reboot behavior—is defined in JSON, enabling reproducible runs and automation-friendly pipelines. Designed for maximum accessibility, the framework has zero external prerequisites and runs solely on a standard Android Studio environment, eliminating the need for complex setup or additional dependencies.
+
 
 ---
 
