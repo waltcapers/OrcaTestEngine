@@ -231,6 +231,6 @@ MIT License without commercial licensing requirements.
    The Software is provided “as is,” without warranty unless otherwise
    specified in a separate commercial agreement.
 
-For commercial licensing inquiries (excluding GM)
+For commercial licensing inquiries (excluding GM), reach out to copyright holder @ wcapers64@gmail.com.
 
 
