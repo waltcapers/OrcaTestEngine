@@ -1,0 +1,275 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OrcaTestConfig",
+  "type": "object",
+  "required": ["randomSeed", "events"],
+  "properties": {
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+
+    "randomSeed": { "type": "integer" },
+
+    "runMode": {
+      "type": "string",
+      "enum": ["RANDOM", "SEQUENTIAL", "MIXED"]
+    },
+
+    "logcat": { "$ref": "#/definitions/LogcatConfig" },
+
+    "postRebootScript": { "type": "string" },
+
+    "defaultTimeoutSeconds": { "type": "integer", "minimum": 1 },
+
+    "defaultRetry": { "$ref": "#/definitions/RetryPolicy" },
+
+    "maxTestDurationSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+
+    "targetPackage": {
+      "type": "string",
+      "description": "Package name of the application being monitored."
+    },
+
+    "defaultSlowThresholdMillis": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Global default threshold for slow-event detection."
+    },
+
+    "debug": {
+      "type": "boolean",
+      "default": false
+    },
+
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/StressEvent" },
+      "minItems": 1
+    }
+  },
+
+  "definitions": {
+    "LogcatConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "rotateOnReboot": { "type": "boolean", "default": true },
+        "tag": { "type": "string" }
+      }
+    },
+
+    "StressEvent": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+
+        "type": {
+          "type": "string",
+          "enum": ["SCRIPT", "NO_OP", "SEQUENCE", "WAIT_FOR_DEVICE"]
+        },
+
+        "mode": {
+          "type": "string",
+          "enum": ["RANDOM", "SEQUENTIAL", "CONDITIONAL"]
+        },
+
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+
+        "weight": { "type": "integer", "minimum": 1 },
+
+        "profileWeights": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        },
+
+        "cooldownSeconds": { "type": "integer", "minimum": 0 },
+        "maxExecutions": { "type": "integer", "minimum": 1 },
+        "timeoutSeconds": { "type": "integer", "minimum": 1 },
+        "durationSeconds": { "type": "integer", "minimum": 1 },
+
+        "safetyLevel": {
+          "type": "string",
+          "enum": ["LOW", "MODERATE", "HIGH", "CRITICAL"]
+        },
+
+        "enabled": { "type": "boolean" },
+
+        "language": {
+          "type": "string",
+          "enum": [
+            "SHELL",
+            "BATCH",
+            "PYTHON",
+            "POWERSHELL",
+            "RUBY",
+            "NODE",
+            "CUSTOM"
+          ]
+        },
+
+        "script": { "$ref": "#/definitions/ScriptDefinition" },
+
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+
+        "requiresRoot": { "type": "boolean" },
+
+        "preconditions": { "$ref": "#/definitions/Preconditions" },
+
+        "requireState": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+
+        "setState": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+
+        "onFailure": {
+          "type": "string",
+          "enum": ["STOP_TEST", "LOG_ONLY", "RETRY", "SKIP_FUTURE"]
+        },
+
+        "retryPolicy": { "$ref": "#/definitions/RetryPolicy" },
+
+        "postEvents": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+
+        "conditionalTriggers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ConditionalTrigger" }
+        },
+
+        "sequence": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+
+        "metrics": { "$ref": "#/definitions/MetricsConfig" },
+
+        "logOutput": { "type": "boolean" },
+        "logErrors": { "type": "boolean" },
+        "logFile": { "type": "string" },
+
+        "causesReboot": {
+          "type": "boolean",
+          "default": false
+        },
+
+        "processDeathAllowed": {
+          "type": "boolean",
+          "default": false
+        },
+
+        "waitForBoot": {
+          "type": "boolean",
+          "default": false
+        },
+
+        "restartAppAfterBoot": {
+          "type": "boolean",
+          "default": false
+        },
+
+        "slowThresholdMillis": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
+
+    "ScriptDefinition": {
+      "type": "object",
+      "properties": {
+        "inline": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "file": { "type": "string" }
+      },
+      "anyOf": [
+        { "required": ["inline"] },
+        { "required": ["file"] }
+      ]
+    },
+
+    "Preconditions": {
+      "type": "object",
+      "properties": {
+        "batteryAbove": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "batteryBelow": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "networkRequired": { "type": "boolean" },
+        "deviceIdle": { "type": "boolean" },
+        "screenOn": { "type": "boolean" },
+        "chargingRequired": { "type": "boolean" },
+        "rootRequired": { "type": "boolean" },
+        "fileMustExist": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "adbAvailable": { "type": "boolean" }
+      }
+    },
+
+    "MetricsConfig": {
+      "type": "object",
+      "properties": {
+        "captureCpuUsage": { "type": "boolean" },
+        "captureMemoryUsage": { "type": "boolean" },
+        "captureBatteryLevel": { "type": "boolean" },
+        "customMetrics": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "RetryPolicy": {
+      "type": "object",
+      "properties": {
+        "maxAttempts": { "type": "integer", "minimum": 1 },
+        "backoffSeconds": { "type": "integer", "minimum": 0 },
+        "strategy": {
+          "type": "string",
+          "enum": ["LINEAR", "EXPONENTIAL"]
+        }
+      }
+    },
+
+    "ConditionalTrigger": {
+      "type": "object",
+      "required": ["triggerEventId"],
+      "properties": {
+        "triggerEventId": { "type": "string" },
+        "ifOutputContains": { "type": "string" },
+        "ifExitCodeNotZero": { "type": "boolean" },
+        "ifExitCodeEquals": { "type": "integer" },
+        "ifMetricAbove": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        },
+        "ifMetricBelow": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        }
+      }
+    }
+  }
+}

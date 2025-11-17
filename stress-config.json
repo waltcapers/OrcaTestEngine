@@ -1,0 +1,96 @@
+{
+  "name": "Deterministic NO-OP Test",
+  "description": "Validates deterministic execution ordering when using a fixed random seed.",
+  "randomSeed": 123,
+  "runMode": "RANDOM",
+  "debug": true,
+
+  "targetPackage": "com.example.placeholder",
+  "defaultSlowThresholdMillis": 2000,
+  "maxTestDurationSeconds": 1,
+  "defaultTimeoutSeconds": 5,
+  "defaultRetry": {
+    "maxAttempts": 1,
+    "backoffSeconds": 0,
+    "strategy": "LINEAR"
+  },
+
+  "events": [
+    {
+      "id": "noop_1",
+      "description": "First NO-OP event",
+      "type": "NO_OP",
+      "mode": "RANDOM",
+      "weight": 5,
+      "enabled": true
+    },
+    {
+      "id": "noop_2",
+      "description": "Second NO-OP event",
+      "type": "NO_OP",
+      "mode": "RANDOM",
+      "weight": 3,
+      "enabled": true,
+      "setState": { "lastEvent": "NOOP_2" }
+    },
+    {
+      "id": "noop_3",
+      "description": "Third NO-OP event, only runs when state matches",
+      "type": "NO_OP",
+      "mode": "RANDOM",
+      "weight": 2,
+      "enabled": true,
+      "requireState": { "lastEvent": "NOOP_2" }
+    },
+    {
+      "id": "noop_sequence",
+      "description": "Sequence of two NO-OP events",
+      "type": "SEQUENCE",
+      "mode": "RANDOM",
+      "weight": 1,
+      "enabled": true,
+      "sequence": ["noop_4", "noop_5"]
+    },
+    {
+      "id": "noop_4",
+      "description": "Sequence child 1",
+      "type": "NO_OP",
+      "mode": "SEQUENTIAL",
+      "enabled": true
+    },
+    {
+      "id": "noop_5",
+      "description": "Sequence child 2",
+      "type": "NO_OP",
+      "mode": "SEQUENTIAL",
+      "enabled": true
+    },
+    {
+      "id": "noop_post",
+      "description": "NO-OP event triggered after noop_1",
+      "type": "NO_OP",
+      "mode": "SEQUENTIAL",
+      "enabled": true
+    },
+    {
+      "id": "noop_trigger_on_noop2",
+      "description": "Runs only when noop_2 runs",
+      "type": "NO_OP",
+      "mode": "CONDITIONAL",
+      "enabled": true,
+      "conditionalTriggers": [
+        {
+          "triggerEventId": "noop_6",
+          "ifOutputContains": "dummy"
+        }
+      ]
+    },
+    {
+      "id": "noop_6",
+      "description": "Triggered NO-OP placeholder",
+      "type": "NO_OP",
+      "mode": "SEQUENTIAL",
+      "enabled": true
+    }
+  ]
+}
