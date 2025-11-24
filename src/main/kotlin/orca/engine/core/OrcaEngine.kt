@@ -259,48 +259,89 @@ class OrcaEngine(
      * - WAIT_FOR_DEVICE
      * - SCRIPT execution via ScriptRunner
      * - reboot recovery and process monitoring
+     *
+     * 🔍 NEW: Metrics integration
+     * If the event defines a MetricsConfig (event.metrics != null), the engine:
+     *  - captures a pre-execution metrics snapshot from SystemInspector
+     *  - runs the script
+     *  - captures a post-execution metrics snapshot
+     *  - computes deltas (post - pre) where possible
+     *  - merges the resulting metrics into ScriptResult.metrics
+     *  - contributes them to globalMetrics for summary reporting
      */
     private fun executeSingleAttempt(event: StressEvent): Boolean {
         val stats = eventStats.getOrPut(event.id) { EventStats() }
 
-        // SEQUENCE event
+        // -------------------------------------------------------------------------
+        // 1. Handle SEQUENCE events (no script execution here)
+        // -------------------------------------------------------------------------
         if (event.type == EventType.SEQUENCE) {
             return executeSequence(event)
         }
 
-        // NO_OP event
+        // -------------------------------------------------------------------------
+        // 2. Handle NO_OP events (instant success, no external interaction)
+        // -------------------------------------------------------------------------
         if (event.type == EventType.NO_OP) {
             logger.info("NO-OP event ${event.id}: ${event.description}")
 
-            // Give NO-OP a 0ms duration
+            // Give NO-OP a 0ms duration and update stats accordingly.
             stats.lastDurationMs = 0
             stats.totalDuration += 0
             stats.minDuration = minOf(stats.minDuration, 0)
             stats.maxDuration = maxOf(stats.maxDuration, 0)
 
+            // Mark as successful; no metrics or state changes beyond setState.
             markSuccess(event, stats, emptyMap())
             debug("NO_OP event executed: ${event.id}")
             return true
         }
 
-        // WAIT_FOR_DEVICE event
+        // -------------------------------------------------------------------------
+        // 3. Handle WAIT_FOR_DEVICE events (reboot recovery glue)
+        // -------------------------------------------------------------------------
         if (event.type == EventType.WAIT_FOR_DEVICE) {
             systemInspector.awaitDeviceOnline()
             if (event.waitForBoot) systemInspector.awaitBootCompleted()
             return true
         }
 
-        // SCRIPT event
+        // -------------------------------------------------------------------------
+        // 4. SCRIPT events — this is where metrics + execution timing live
+        // -------------------------------------------------------------------------
         logger.info("Executing event ${event.id} (${event.language})")
 
+        // We will build up the ScriptResult in stages:
+        //  - First by executing the script via ScriptRunner
+        //  - Then by augmenting it with metrics captured by the SystemInspector
         lateinit var result: ScriptResult
 
-        // Measure true execution time of the script itself
+        // Resolve any metrics configuration for this event.
+        // If event.metrics is null, we simply skip all metrics work.
+        val metricsConfig = event.metrics
+
+        // -------------------------------------------------------------------------
+        // 4a. Pre-execution metrics snapshot (optional)
+        // -------------------------------------------------------------------------
+        // If metricsConfig is present, ask the SystemInspector for a snapshot
+        // *before* the script runs. This might include CPU, memory, battery, etc.
+        val preMetrics: Map<String, Double> = if (metricsConfig != null) {
+            debug("Capturing pre-execution metrics for event ${event.id}")
+            systemInspector.captureMetrics(metricsConfig)
+        } else {
+            emptyMap()
+        }
+
+        // -------------------------------------------------------------------------
+        // 4b. Measure the script execution duration
+        // -------------------------------------------------------------------------
+        // We measure wall-clock time for the script via ScriptRunner.
         val durationMillis = measureTimeMillis {
             result = scriptRunner.run(event)
         }
 
-        // Update duration-related stats (timestamp and executions are updated in markSuccess)
+        // Update duration-related stats (timestamp and execution counts are
+        // updated later in markSuccess()).
         stats.lastDurationMs = durationMillis
         stats.totalDuration += durationMillis
         if (durationMillis < stats.minDuration) stats.minDuration = durationMillis
@@ -308,7 +349,7 @@ class OrcaEngine(
 
         logger.info("Event ${event.id} completed in ${durationMillis}ms (avg=${stats.averageDuration}ms)")
 
-        // Slow event detection (optional threshold)
+        // Warn if the event exceeded its slow threshold.
         val slowThreshold = event.slowThresholdMillis ?: config.defaultSlowThresholdMillis
         if (slowThreshold != null && durationMillis >= slowThreshold) {
             logger.warn(
@@ -316,11 +357,65 @@ class OrcaEngine(
             )
         }
 
+        // -------------------------------------------------------------------------
+        // 4c. Post-execution metrics snapshot + delta computation (optional)
+        // -------------------------------------------------------------------------
+        // If a metrics config was provided, capture a second snapshot *after*
+        // script execution and compute per-metric deltas (post - pre).
+        if (metricsConfig != null) {
+            debug("Capturing post-execution metrics for event ${event.id}")
+            val postMetrics = systemInspector.captureMetrics(metricsConfig)
+
+            // Build a delta map: for each metric that appears in both pre and post,
+            // we store post - pre. If only one side exists, we keep that value.
+            val deltaMetrics = mutableMapOf<String, Double>()
+            val allKeys = preMetrics.keys union postMetrics.keys
+
+            for (key in allKeys) {
+                val before = preMetrics[key]
+                val after = postMetrics[key]
+
+                val value = when {
+                    before != null && after != null -> after - before
+                    after != null -> after                 // only post snapshot available
+                    else -> before!!                       // only pre snapshot available
+                }
+
+                deltaMetrics[key] = value
+            }
+
+            if (deltaMetrics.isNotEmpty()) {
+                debug("Merging ${deltaMetrics.size} metric(s) into ScriptResult for event ${event.id}")
+
+                // Merge computed deltas into the ScriptResult.metrics map.
+                // We preserve any metrics the script itself may have produced
+                // and only add metrics that are not already defined.
+                val mergedMetrics = result.metrics.toMutableMap()
+                for ((k, v) in deltaMetrics) {
+                    // If a script already provided a value for a metric, we
+                    // leave it untouched to avoid surprising overrides.
+                    if (!mergedMetrics.containsKey(k)) {
+                        mergedMetrics[k] = v
+                    }
+                }
+
+                // Replace the original result with an augmented copy.
+                result = result.copy(metrics = mergedMetrics)
+            }
+        }
+
+        // At this point, result.metrics now contains:
+        //  - any metrics produced by the script itself, plus
+        //  - any system-level deltas contributed by SystemInspector (if configured).
+
         val success = result.exitCode == 0
         val metrics = result.metrics
 
-        // Failure handling
+        // -------------------------------------------------------------------------
+        // 4d. Failure handling and logging
+        // -------------------------------------------------------------------------
         if (!success) {
+            // Track how many times this event has failed.
             eventFailureCount[event.id] = (eventFailureCount[event.id] ?: 0) + 1
             failureLog += FailureRecord(event.id, result.exitCode, result.stderr)
 
@@ -334,40 +429,49 @@ class OrcaEngine(
             }
         }
 
+        // On success we:
+        //  - update per-event statistics
+        //  - apply state transitions
+        //  - fire postEvents and conditional triggers
         if (success) {
             markSuccess(event, stats, metrics)
             handlePostEvents(event)
             handleConditionalTriggers(event, result, metrics)
         }
 
-        // Merge metrics into global summary
+        // -------------------------------------------------------------------------
+        // 4e. Merge metrics into global summary
+        // -------------------------------------------------------------------------
+        // Regardless of success/failure, we fold the metrics into globalMetrics
+        // so they appear in the final run summary.
         metrics.forEach { (k, v) ->
             globalMetrics.getOrPut(k) { mutableListOf() }.add(v)
         }
 
-        // ------------------------------------------------------
-        // Reboot handling
-        // ------------------------------------------------------
+        // -------------------------------------------------------------------------
+        // 5. Reboot handling
+        // -------------------------------------------------------------------------
         if (event.causesReboot) {
             logger.warn("Event ${event.id} initiated a reboot. Entering reboot recovery mode...")
 
             handleRebootRecovery(event)
 
-            // After recovery, consider the event successful if no fatal error
+            // After recovery, consider the event successful if no fatal error.
+            // Note: we do not re-run the script; we just mark success and preserve metrics.
             markSuccess(event, stats, metrics)
             return true
         }
 
-        // ------------------------------------------------------
-        // Process monitoring — detect unexpected app death
-        // ------------------------------------------------------
+        // -------------------------------------------------------------------------
+        // 6. Process monitoring — detect unexpected app death
+        // -------------------------------------------------------------------------
         if (!event.processDeathAllowed && !event.causesReboot) {
             val target = config.targetPackage
 
             if (!systemInspector.isProcessRunning(target)) {
                 logger.error("❌ Target process $target is NOT running after event ${event.id}")
 
-                // Automatically capture replay state for deterministic reproduction
+                // Automatically capture replay state for deterministic reproduction.
                 saveReplayState()
 
                 return when (event.onFailure) {
@@ -384,6 +488,7 @@ class OrcaEngine(
 
         return success
     }
+
 
     /** Helper for debug logging that respects config.debug. */
     private fun debug(msg: String) {

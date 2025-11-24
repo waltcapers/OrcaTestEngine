@@ -6,56 +6,50 @@ import okio.buffer
 import okio.source
 import orca.engine.model.OrcaTestConfig
 import java.io.File
+import orca.engine.config.JsonSchemaValidator
 
 /**
- * Loads a {@link OrcaTestConfig} instance from a JSON configuration file.
+ * Loads a validated OrcaTestConfig from disk.
  *
- * This object encapsulates all configuration parsing logic required by the
- * OrcaEngine. The underlying implementation uses Moshi with Kotlin reflection
- * support to deserialize the JSON into typed Kotlin data classes.
+ * This class now performs **two-phase loading**:
  *
- * Usage example:
- * ```
- * val config = StressConfigLoader.load("stress-config.json")
- * ```
+ *  PHASE 1 — Raw JSON Schema validation (NetworkNT):
+ *      - Ensures structure is correct before deserializing
+ *      - Gives detailed, field-specific error messages
+ *
+ *  PHASE 2 — Moshi object parsing:
+ *      - Converts validated JSON into strongly typed Kotlin objects
  */
 object StressConfigLoader {
 
-    /**
-     * A configured Moshi instance capable of parsing Kotlin data classes.
-     *
-     * Moshi is used as the JSON serialization/deserialization library.
-     * The {@link KotlinJsonAdapterFactory} enables reflection-based adapters
-     * for Kotlin classes.
-     */
+    /** Moshi instance for Kotlin data-class parsing */
     private val moshi = Moshi.Builder()
         .add(KotlinJsonAdapterFactory())
         .build()
 
-    /**
-     * A JSON adapter used to convert configuration JSON into a
-     * {@link OrcaTestConfig} object.
-     */
+    /** Adapter for mapping JSON to OrcaTestConfig */
     private val adapter = moshi.adapter(OrcaTestConfig::class.java)
 
     /**
-     * Loads and parses a stress test configuration file from disk.
-     *
-     * @param path Absolute or relative path to the JSON configuration file.
-     * @return A fully populated {@link OrcaTestConfig} instance.
-     *
-     * @throws IllegalArgumentException if the file does not exist.
-     * @throws IllegalStateException if parsing fails or returns `null`.
+     * Loads, validates, and parses a stress-test configuration JSON file.
      */
-    fun load(path: String): orca.engine.model.OrcaTestConfig {
+    fun load(path: String): OrcaTestConfig {
         val file = File(path)
+
         if (!file.exists()) {
             throw IllegalArgumentException("Config file not found: $path")
         }
 
-        file.source().buffer().use { bufferedSource ->
-            return adapter.fromJson(bufferedSource)
-                ?: error("Failed to parse config.")
+        // ---- PHASE 1: Raw JSON string read ----
+        val rawJson: String = file.readText()
+
+        // ---- NEW: Validate JSON using schema BEFORE parsing ----
+        JsonSchemaValidator.validate(rawJson)
+
+        // ---- PHASE 2: Deserialize into OrcaTestConfig ----
+        file.source().buffer().use { buffered ->
+            return adapter.fromJson(buffered)
+                ?: error("Failed to parse validated config JSON into OrcaTestConfig.")
         }
     }
 }

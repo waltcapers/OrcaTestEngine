@@ -2,109 +2,103 @@ package orca.engine.system
 
 import orca.engine.core.SystemInspector
 import orca.engine.model.MetricsConfig
-import java.io.File
 
 /**
- * Default (stub) implementation of [SystemInspector].
+ * A non-ADB fallback SystemInspector used when running the engine
+ * on a regular desktop JVM with **no Android device connected**.
  *
- * This implementation is intended for:
- *  - Local desktop/debug runs
- *  - Dry-run/warm-up testing of the OrcaEngine
- *  - Environments with no device or emulator attached
+ * This inspector:
+ *  - Never calls adb
+ *  - Always returns safe, reasonable defaults
+ *  - Allows all events to run
+ *  - Prints debug output so you can observe business logic flow
  *
- * All methods return static or placeholder values. On a real device, these
- * methods should be replaced with ADB or platform-specific logic located in a
- * subclass (e.g., `AdbSystemInspector`).
+ * This is extremely helpful while developing the engine itself,
+ * before integrating with a real Android device.
  */
-class DefaultSystemInspector : SystemInspector {
+class DefaultSystemInspector(
+    private val debug: Boolean = true
+) : SystemInspector {
 
-    /**
-     * Returns a fixed battery level (100%).
-     *
-     * Real implementation should execute:
-     *  `adb shell dumpsys battery`
-     */
-    override fun getBatteryLevel(): Int? = 100
+    private fun dbg(msg: String) {
+        if (debug) println("[DefaultSystemInspector] $msg")
+    }
 
-    /** Always returns true. */
-    override fun isNetworkAvailable(): Boolean = true
+    override fun getBatteryLevel(): Int? {
+        dbg("getBatteryLevel() → returning 80%")
+        return 80
+    }
 
-    /** Always returns false (device is never considered idle). */
-    override fun isDeviceIdle(): Boolean = false
+    override fun isNetworkAvailable(): Boolean? {
+        dbg("isNetworkAvailable() → true")
+        return true
+    }
 
-    /** Always returns true (screen assumed on). */
-    override fun isScreenOn(): Boolean = true
+    override fun isDeviceIdle(): Boolean? {
+        dbg("isDeviceIdle() → false")
+        return false
+    }
 
-    /** Always returns true (device assumed charging). */
-    override fun isCharging(): Boolean = true
+    override fun isScreenOn(): Boolean? {
+        dbg("isScreenOn() → true")
+        return true
+    }
 
-    /** Always returns true (placeholder — no actual root check). */
-    override fun isRootAvailable(): Boolean = true
+    override fun isCharging(): Boolean? {
+        dbg("isCharging() → true")
+        return true
+    }
 
-    /** Always returns true (placeholder — no ADB validation). */
-    override fun adbAvailable(): Boolean = true
+    override fun isRootAvailable(): Boolean? {
+        dbg("isRootAvailable() → false")
+        return false
+    }
 
-    /** Returns true if the file exists on the *host* filesystem. */
-    override fun fileExists(path: String): Boolean =
-        File(path).exists()
+    override fun adbAvailable(): Boolean? {
+        dbg("adbAvailable() → false (offline mode)")
+        return false
+    }
 
-    /**
-     * Placeholder for metric collection.
-     *
-     * A real version may gather CPU, memory, or custom values via:
-     *  - `adb shell top`
-     *  - `dumpsys meminfo`
-     *  - `/proc` polling
-     */
+    override fun fileExists(path: String): Boolean {
+        dbg("fileExists('$path') → returning false (simulated)")
+        return false
+    }
+
     override fun captureMetrics(config: MetricsConfig?): Map<String, Double> {
-        return emptyMap() // Not implemented yet
+        if (config == null) return emptyMap()
+
+        dbg("captureMetrics() → returning default dummy metrics")
+
+        val map = mutableMapOf<String, Double>()
+
+        if (config.captureCpuUsage) map["cpu.totalPercent"] = 12.5
+        if (config.captureMemoryUsage) {
+            map["mem.usedMb"] = 512.0
+            map["mem.totalMb"] = 4096.0
+        }
+        if (config.captureBatteryLevel) map["battery.levelPercent"] = 80.0
+
+        return map
     }
 
-    /**
-     * Always returns true.
-     *
-     * Real implementation should check:
-     *  `adb shell pidof <package>`
-     */
-    override fun isProcessRunning(packageName: String?): Boolean = true
+    override fun isProcessRunning(packageName: String?): Boolean {
+        dbg("isProcessRunning($packageName) → returning true")
+        return true
+    }
 
-    /**
-     * Simulates a device shutdown by sleeping.
-     *
-     * Replace with polling:
-     *  `adb get-state` → "offline"
-     */
     override fun awaitDeviceOffline() {
-        Thread.sleep(5000)
+        dbg("awaitDeviceOffline() → skipped (offline mode)")
     }
 
-    /**
-     * Simulates a device boot-up by sleeping.
-     *
-     * Replace with polling until:
-     *  `adb get-state` → "device"
-     */
     override fun awaitDeviceOnline() {
-        Thread.sleep(15000)
+        dbg("awaitDeviceOnline() → skipped (offline mode)")
     }
 
-    /**
-     * Simulates boot completion by sleeping.
-     *
-     * Replace with polling:
-     *  `adb shell getprop sys.boot_completed` → "1"
-     */
     override fun awaitBootCompleted() {
-        Thread.sleep(20000)
+        dbg("awaitBootCompleted() → skipped (offline mode)")
     }
 
-    /**
-     * Simulates starting an app.
-     *
-     * Real implementation should run:
-     *  `adb shell monkey -p <pkg> -c android.intent.category.LAUNCHER 1`
-     */
     override fun startApp(packageName: String?) {
-        println("Starting app: $packageName (placeholder)")
+        dbg("startApp($packageName) → simulated launch")
     }
 }
