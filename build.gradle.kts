@@ -22,7 +22,8 @@ dependencies {
     implementation("com.squareup.okio:okio:3.7.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
     implementation("com.networknt:json-schema-validator:1.0.83")
-
+    testImplementation("io.mockk:mockk:1.13.7")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
     testImplementation(kotlin("test"))
 }
 

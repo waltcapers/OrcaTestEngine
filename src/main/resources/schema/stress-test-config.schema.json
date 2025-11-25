@@ -1,275 +1,468 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "OrcaTestConfig",
+  "description": "JSON Schema for OrcaTestEngine configuration. Licensed under a dual MIT + GM license (see project LICENSE).",
   "type": "object",
+
   "required": ["randomSeed", "events"],
+
   "properties": {
-    "name": { "type": "string" },
-    "description": { "type": "string" },
-
-    "randomSeed": { "type": "integer" },
-
-    "runMode": {
+    "name": {
       "type": "string",
-      "enum": ["RANDOM", "SEQUENTIAL", "MIXED"]
+      "description": "Optional human-readable name for this test configuration."
     },
 
-    "logcat": { "$ref": "#/definitions/LogcatConfig" },
-
-    "postRebootScript": { "type": "string" },
-
-    "defaultTimeoutSeconds": { "type": "integer", "minimum": 1 },
-
-    "defaultRetry": { "$ref": "#/definitions/RetryPolicy" },
-
-    "maxTestDurationSeconds": {
-      "type": "integer",
-      "minimum": 1
-    },
-
-    "targetPackage": {
+    "description": {
       "type": "string",
-      "description": "Package name of the application being monitored."
+      "description": "Optional longer description of the test scenario."
     },
 
     "defaultSlowThresholdMillis": {
       "type": ["integer", "null"],
       "minimum": 0,
-      "description": "Global default threshold for slow-event detection."
+      "description": "Global default threshold for slow-event detection in milliseconds. If null, slow-event warnings are disabled."
     },
 
-    "debug": {
-      "type": "boolean",
-      "default": false
+    "randomSeed": {
+      "type": "integer",
+      "description": "Seed for deterministic RNG used for RANDOM-mode event selection."
+    },
+
+    "runMode": {
+      "type": "string",
+      "enum": ["RANDOM", "SEQUENTIAL", "MIXED"],
+      "description": "Global run mode for the engine. Currently the engine primarily uses RANDOM but SEQUENTIAL/MIXED are reserved for future expansion."
+    },
+
+    "defaultTimeoutSeconds": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Optional default timeout (seconds) for event scripts. Individual events may override this via timeoutSeconds."
+    },
+
+    "defaultRetry": {
+      "$ref": "#/definitions/RetryPolicy"
     },
 
     "events": {
       "type": "array",
+      "minItems": 1,
       "items": { "$ref": "#/definitions/StressEvent" },
-      "minItems": 1
+      "description": "The complete list of StressEvent definitions comprising the test plan."
+    },
+
+    "targetPackage": {
+      "type": ["string", "null"],
+      "description": "Android package name of the app under test. Used by SystemInspector for process monitoring and logcat tagging."
+    },
+
+    "debug": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, OrcaEngine emits additional debug logging about selection, cooldowns, and triggers."
+    },
+
+    "maxTestDurationSeconds": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Optional global cap on test duration (seconds) when using runForDuration()."
+    },
+
+    "logcat": {
+      "$ref": "#/definitions/LogcatConfig"
+    },
+
+    "postRebootScript": {
+      "type": ["string", "null"],
+      "description": "Optional path to a script executed after reboot recovery completes (e.g., reapply settings or re-initialize tools)."
     }
   },
 
   "definitions": {
     "LogcatConfig": {
       "type": "object",
+      "description": "Controls logcat capture behavior during a stress run.",
       "properties": {
-        "enabled": { "type": "boolean", "default": true },
-        "rotateOnReboot": { "type": "boolean", "default": true },
-        "tag": { "type": "string" }
-      }
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, logcat capture is enabled during runs."
+        },
+        "rotateOnReboot": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, logcat capture is stopped before reboot and restarted after the device comes back online."
+        },
+        "tag": {
+          "type": ["string", "null"],
+          "description": "Optional tag or substring used to filter logcat output (e.g., a package name)."
+        }
+      },
+      "additionalProperties": false
     },
 
     "StressEvent": {
       "type": "object",
+      "description": "Represents a single executable unit within a stress test: a script, NO-OP, SEQUENCE, or WAIT_FOR_DEVICE.",
       "required": ["id"],
       "properties": {
-        "id": { "type": "string" },
-        "description": { "type": "string" },
+        "id": {
+          "type": "string",
+          "description": "Unique logical ID for this event. Must be unique across all events."
+        },
+
+        "description": {
+          "type": ["string", "null"],
+          "description": "Optional human-readable description of the event."
+        },
 
         "type": {
           "type": "string",
-          "enum": ["SCRIPT", "NO_OP", "SEQUENCE", "WAIT_FOR_DEVICE"]
+          "enum": ["SCRIPT", "NO_OP", "SEQUENCE", "WAIT_FOR_DEVICE"],
+          "description": "High-level behavior of the event (script execution, sequence, no-op, or wait-for-device)."
         },
 
         "mode": {
           "type": "string",
-          "enum": ["RANDOM", "SEQUENTIAL", "CONDITIONAL"]
+          "enum": ["RANDOM", "SEQUENTIAL", "CONDITIONAL"],
+          "description": "Determines how/when the event is selected: RANDOM pool, SEQUENTIAL sequence-only, or CONDITIONAL triggers."
+        },
+
+        "slowThresholdMillis": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Per-event override for slow-event threshold in milliseconds. Uses config.defaultSlowThresholdMillis if null."
+        },
+
+        "processDeathAllowed": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, process death after this event is allowed and will not be treated as a failure."
         },
 
         "tags": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": { "type": "string" },
+          "description": "Arbitrary classification tags for this event (e.g., 'network', 'power', 'reboot')."
         },
 
-        "weight": { "type": "integer", "minimum": 1 },
+        "causesReboot": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, this event is expected to trigger a device reboot and will activate reboot recovery logic."
+        },
+
+        "waitForBoot": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true and causesReboot is set, OrcaEngine waits for BOOT_COMPLETED after reboot."
+        },
+
+        "restartAppAfterBoot": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true and causesReboot is set, OrcaEngine restarts the target app after reboot recovery."
+        },
+
+        "weight": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Base weight for RANDOM-mode selection. Higher values increase selection frequency relative to other events."
+        },
 
         "profileWeights": {
-          "type": "object",
-          "additionalProperties": { "type": "integer", "minimum": 1 }
+          "type": ["object", "null"],
+          "description": "Optional run-profile-specific overrides for weight, e.g. { \"aggressive\": 5, \"light\": 1 }.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
         },
 
-        "cooldownSeconds": { "type": "integer", "minimum": 0 },
-        "maxExecutions": { "type": "integer", "minimum": 1 },
-        "timeoutSeconds": { "type": "integer", "minimum": 1 },
-        "durationSeconds": { "type": "integer", "minimum": 1 },
+        "cooldownSeconds": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Minimum number of seconds that must elapse between successful executions of this event."
+        },
+
+        "maxExecutions": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Maximum number of times this event may run in a single test. After that it will be skipped."
+        },
+
+        "timeoutSeconds": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Optional script timeout for this event (seconds). Overrides config.defaultTimeoutSeconds."
+        },
+
+        "durationSeconds": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Optional target duration (seconds) for long-running or ramp tests."
+        },
 
         "safetyLevel": {
           "type": "string",
-          "enum": ["LOW", "MODERATE", "HIGH", "CRITICAL"]
+          "enum": ["LOW", "MODERATE", "HIGH", "CRITICAL"],
+          "description": "Relative safety classification: LOW, MODERATE, HIGH, or CRITICAL."
         },
 
-        "enabled": { "type": "boolean" },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "If false, the event is disabled and never runs."
+        },
 
         "language": {
-          "type": "string",
-          "enum": [
-            "SHELL",
-            "BATCH",
-            "PYTHON",
-            "POWERSHELL",
-            "RUBY",
-            "NODE",
-            "CUSTOM"
-          ]
+          "type": ["string", "null"],
+          "enum": ["SHELL", "BATCH", "PYTHON", "POWERSHELL", "RUBY", "NODE", "CUSTOM"],
+          "description": "Script language handler. Only meaningful when type == SCRIPT or a script is associated."
         },
 
-        "script": { "$ref": "#/definitions/ScriptDefinition" },
+        "script": {
+          "$ref": "#/definitions/ScriptDefinition"
+        },
 
         "args": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": { "type": "string" },
+          "description": "Optional argument list passed to the script handler."
         },
 
         "env": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "description": "Environment variables passed to the script execution.",
+          "additionalProperties": {
+            "type": "string"
+          }
         },
 
-        "requiresRoot": { "type": "boolean" },
+        "requiresRoot": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, the event requires that SystemInspector reports root access as available."
+        },
 
-        "preconditions": { "$ref": "#/definitions/Preconditions" },
+        "preconditions": {
+          "$ref": "#/definitions/Preconditions"
+        },
 
         "requireState": {
           "type": "object",
+          "description": "State key/value pairs that must be present for this event to be eligible.",
           "additionalProperties": { "type": "string" }
         },
 
         "setState": {
           "type": "object",
+          "description": "State key/value pairs applied after a successful event execution.",
           "additionalProperties": { "type": "string" }
         },
 
         "onFailure": {
           "type": "string",
-          "enum": ["STOP_TEST", "LOG_ONLY", "RETRY", "SKIP_FUTURE"]
+          "enum": ["STOP_TEST", "LOG_ONLY", "RETRY", "SKIP_FUTURE"],
+          "description": "Controls how the engine reacts to failures: stop, log-only, retry, or disable future runs of this event."
         },
 
-        "retryPolicy": { "$ref": "#/definitions/RetryPolicy" },
+        "retryPolicy": {
+          "$ref": "#/definitions/RetryPolicy"
+        },
 
         "postEvents": {
           "type": "array",
+          "description": "List of event IDs to automatically trigger after this event succeeds.",
           "items": { "type": "string" }
         },
 
         "conditionalTriggers": {
           "type": "array",
+          "description": "Conditional rules that can trigger other events based on script output, exit code, or metrics.",
           "items": { "$ref": "#/definitions/ConditionalTrigger" }
         },
 
         "sequence": {
           "type": "array",
+          "description": "For SEQUENCE-type events, the ordered list of child event IDs to execute.",
           "items": { "type": "string" }
         },
 
-        "metrics": { "$ref": "#/definitions/MetricsConfig" },
-
-        "logOutput": { "type": "boolean" },
-        "logErrors": { "type": "boolean" },
-        "logFile": { "type": "string" },
-
-        "causesReboot": {
-          "type": "boolean",
-          "default": false
+        "metrics": {
+          "$ref": "#/definitions/MetricsConfig"
         },
 
-        "processDeathAllowed": {
+        "logOutput": {
           "type": "boolean",
-          "default": false
+          "description": "If true, stdout is logged when the event succeeds."
         },
 
-        "waitForBoot": {
+        "logErrors": {
           "type": "boolean",
-          "default": false
+          "description": "If true, stderr is logged when the event fails."
         },
 
-        "restartAppAfterBoot": {
-          "type": "boolean",
-          "default": false
-        },
-
-        "slowThresholdMillis": {
-          "type": ["integer", "null"],
-          "minimum": 0
+        "logFile": {
+          "type": ["string", "null"],
+          "description": "Optional file path for event-specific logging."
         }
       }
+      /* NOTE: No additionalProperties:false here → event objects stay extensible */
     },
 
     "ScriptDefinition": {
       "type": "object",
+      "description": "Defines where the script content comes from: inline lines or an external file path. Exactly one must be provided.",
       "properties": {
         "inline": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": { "type": "string" },
+          "description": "Inline script lines embedded directly in the configuration."
         },
-        "file": { "type": "string" }
+        "file": {
+          "type": "string",
+          "description": "Path to an external script file."
+        }
       },
       "anyOf": [
         { "required": ["inline"] },
         { "required": ["file"] }
-      ]
+      ],
+      "additionalProperties": false
     },
 
     "Preconditions": {
       "type": "object",
+      "description": "System-level constraints that must be satisfied for an event to be eligible for execution.",
       "properties": {
-        "batteryAbove": { "type": "integer", "minimum": 0, "maximum": 100 },
-        "batteryBelow": { "type": "integer", "minimum": 0, "maximum": 100 },
-        "networkRequired": { "type": "boolean" },
-        "deviceIdle": { "type": "boolean" },
-        "screenOn": { "type": "boolean" },
-        "chargingRequired": { "type": "boolean" },
-        "rootRequired": { "type": "boolean" },
+        "batteryAbove": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Event is only eligible if battery >= this percentage."
+        },
+        "batteryBelow": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Event is only eligible if battery <= this percentage."
+        },
+        "networkRequired": {
+          "type": ["boolean", "null"],
+          "description": "If true, a network connection must be available."
+        },
+        "deviceIdle": {
+          "type": ["boolean", "null"],
+          "description": "If true, the device must be in an idle state (as defined by SystemInspector)."
+        },
+        "screenOn": {
+          "type": ["boolean", "null"],
+          "description": "If true, the display must be on."
+        },
+        "chargingRequired": {
+          "type": ["boolean", "null"],
+          "description": "If true, the device must be plugged in and charging."
+        },
+        "rootRequired": {
+          "type": ["boolean", "null"],
+          "description": "If true, root access must be available."
+        },
         "fileMustExist": {
           "type": "array",
+          "description": "List of paths that must exist on the device for the event to run.",
           "items": { "type": "string" }
         },
-        "adbAvailable": { "type": "boolean" }
-      }
+        "adbAvailable": {
+          "type": ["boolean", "null"],
+          "description": "If true, ADB connection must be available; if false, requires no ADB connection; if null, ADB state is not checked."
+        }
+      },
+      "additionalProperties": false
     },
 
     "MetricsConfig": {
       "type": "object",
+      "description": "Controls which metrics are captured around the event execution.",
       "properties": {
-        "captureCpuUsage": { "type": "boolean" },
-        "captureMemoryUsage": { "type": "boolean" },
-        "captureBatteryLevel": { "type": "boolean" },
+        "captureCpuUsage": {
+          "type": "boolean",
+          "description": "If true, SystemInspector attempts to collect CPU usage metrics."
+        },
+        "captureMemoryUsage": {
+          "type": "boolean",
+          "description": "If true, SystemInspector attempts to collect memory usage metrics."
+        },
+        "captureBatteryLevel": {
+          "type": "boolean",
+          "description": "If true, SystemInspector attempts to collect current battery level."
+        },
         "customMetrics": {
           "type": "array",
+          "description": "Optional list of custom metric identifiers that a SystemInspector may interpret.",
           "items": { "type": "string" }
         }
-      }
+      },
+      "additionalProperties": false
     },
 
     "RetryPolicy": {
       "type": "object",
+      "description": "Defines how the engine retries a failing event when FailurePolicy.RETRY is used.",
       "properties": {
-        "maxAttempts": { "type": "integer", "minimum": 1 },
-        "backoffSeconds": { "type": "integer", "minimum": 0 },
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total number of attempts (initial + retries)."
+        },
+        "backoffSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Base backoff delay (seconds) between retries."
+        },
         "strategy": {
           "type": "string",
-          "enum": ["LINEAR", "EXPONENTIAL"]
+          "enum": ["LINEAR", "EXPONENTIAL"],
+          "description": "Backoff strategy used to compute per-attempt delays."
         }
-      }
+      },
+      "additionalProperties": false
     },
 
     "ConditionalTrigger": {
       "type": "object",
+      "description": "Rule that can trigger another event based on script output, exit codes, or metrics.",
       "required": ["triggerEventId"],
       "properties": {
-        "triggerEventId": { "type": "string" },
-        "ifOutputContains": { "type": "string" },
-        "ifExitCodeNotZero": { "type": "boolean" },
-        "ifExitCodeEquals": { "type": "integer" },
+        "triggerEventId": {
+          "type": "string",
+          "description": "ID of the event to trigger when conditions are satisfied."
+        },
+        "ifOutputContains": {
+          "type": ["string", "null"],
+          "description": "If non-null, trigger fires only if stdout or stderr contains this substring."
+        },
+        "ifExitCodeNotZero": {
+          "type": ["boolean", "null"],
+          "description": "If true, trigger fires only when exitCode != 0."
+        },
+        "ifExitCodeEquals": {
+          "type": ["integer", "null"],
+          "description": "If non-null, trigger fires only when exitCode equals this value."
+        },
         "ifMetricAbove": {
-          "type": "object",
+          "type": ["object", "null"],
+          "description": "Map of metricName → threshold. All metrics must be strictly greater than the threshold.",
           "additionalProperties": { "type": "number" }
         },
         "ifMetricBelow": {
-          "type": "object",
+          "type": ["object", "null"],
+          "description": "Map of metricName → threshold. All metrics must be strictly less than the threshold.",
           "additionalProperties": { "type": "number" }
         }
-      }
+      },
+      "additionalProperties": false
     }
   }
 }

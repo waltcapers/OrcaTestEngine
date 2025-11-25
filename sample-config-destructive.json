@@ -1,0 +1,54 @@
+{
+  "name": "Destructive Device Test",
+  "description": "Exercises reboot flow, WAIT_FOR_DEVICE, and post-reboot recovery.",
+  "randomSeed": 4242,
+  "runMode": "SEQUENTIAL",
+  "debug": true,
+
+  "targetPackage": "com.example.primaryapp",
+  "postRebootScript": "scripts/recovery.sh",
+
+  "logcat": {
+    "enabled": true,
+    "rotateOnReboot": true,
+    "tag": "com.example.primaryapp"
+  },
+
+  "events": [
+    {
+      "id": "trigger_reboot",
+      "description": "Forces device reboot via ADB.",
+      "type": "SCRIPT",
+      "mode": "SEQUENTIAL",
+      "enabled": true,
+
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Rebooting now...'",
+          "adb reboot"
+        ]
+      },
+
+      "causesReboot": true,
+      "waitForBoot": true,
+      "restartAppAfterBoot": true
+    },
+
+    {
+      "id": "wait_for_device",
+      "description": "Waits for ADB device state after reboot.",
+      "type": "WAIT_FOR_DEVICE",
+      "mode": "SEQUENTIAL",
+      "enabled": true
+    },
+
+    {
+      "id": "post_reboot_noop",
+      "description": "Runs after reboot recovery.",
+      "type": "NO_OP",
+      "mode": "SEQUENTIAL",
+      "enabled": true
+    }
+  ]
+}

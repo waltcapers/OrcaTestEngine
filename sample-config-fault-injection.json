@@ -1,0 +1,61 @@
+{
+  "name": "Fault Injection & Recovery",
+  "description": "Tests retries, conditional triggers, and failure handling.",
+  "randomSeed": 777,
+  "runMode": "RANDOM",
+  "debug": true,
+  "targetPackage": "com.example.app",
+
+  "defaultRetry": {
+    "maxAttempts": 2,
+    "backoffSeconds": 1,
+    "strategy": "LINEAR"
+  },
+
+  "events": [
+    {
+      "id": "bad_script",
+      "description": "Script that intentionally fails.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "enabled": true,
+      "weight": 3,
+
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'About to fail...'",
+          "exit 1"
+        ]
+      },
+
+      "onFailure": "RETRY",
+
+      "conditionalTriggers": [
+        {
+          "triggerEventId": "failure_followup",
+          "ifExitCodeNotZero": true
+        }
+      ]
+    },
+
+    {
+      "id": "failure_followup",
+      "description": "Runs after script failure.",
+      "type": "NO_OP",
+      "mode": "CONDITIONAL",
+      "enabled": true
+    },
+
+    {
+      "id": "file_check_step",
+      "description": "Verifies file existence before running.",
+      "type": "NO_OP",
+      "mode": "RANDOM",
+      "enabled": true,
+      "preconditions": {
+        "fileMustExist": ["/etc/hosts"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "Minimal Config",
+  "description": "Smallest valid configuration for engine smoke testing.",
+  "randomSeed": 1,
+  "runMode": "RANDOM",
+  "debug": true,
+
+  "events": [
+    {
+      "id": "noop_basic",
+      "type": "NO_OP",
+      "mode": "RANDOM",
+      "enabled": true,
+      "weight": 1
+    }
+  ]
+}

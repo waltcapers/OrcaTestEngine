@@ -1,0 +1,251 @@
+{
+  "name": "Extreme Chaos Mode",
+  "description": "Max-stress configuration that pushes reboot logic, nested sequences, conditional triggers, metrics feedback, and safety levels to the limit.",
+  "randomSeed": 7777777,
+  "runMode": "RANDOM",
+  "debug": true,
+
+  "targetPackage": "com.example.chaosapp",
+
+  "defaultTimeoutSeconds": 8,
+  "defaultSlowThresholdMillis": 1500,
+  "maxTestDurationSeconds": 3600,
+
+  "defaultRetry": {
+    "maxAttempts": 3,
+    "backoffSeconds": 2,
+    "strategy": "EXPONENTIAL"
+  },
+
+  "logcat": {
+    "enabled": true,
+    "rotateOnReboot": true,
+    "tag": "ChaosTag"
+  },
+
+  "postRebootScript": "scripts/post_reboot_recover_network.sh",
+
+  "events": [
+
+    /* ------------------------------------------------------------
+     *  PHASE 1 — DEVICE PREP CHECKS
+     * ------------------------------------------------------------ */
+    {
+      "id": "device_ready_sequence",
+      "description": "Ensures device is prepared for chaos testing.",
+      "type": "SEQUENCE",
+      "mode": "RANDOM",
+      "weight": 2,
+      "sequence": ["check_battery", "check_network", "prepare_state"]
+    },
+
+    {
+      "id": "check_battery",
+      "description": "Battery must be >= 50% before stress.",
+      "type": "NO_OP",
+      "mode": "SEQUENTIAL",
+      "preconditions": {
+        "batteryAbove": 50
+      },
+      "setState": { "batteryReady": "true" }
+    },
+
+    {
+      "id": "check_network",
+      "description": "Network must be online before stress.",
+      "type": "NO_OP",
+      "mode": "SEQUENTIAL",
+      "preconditions": {
+        "networkRequired": true
+      },
+      "setState": { "networkReady": "true" }
+    },
+
+    {
+      "id": "prepare_state",
+      "description": "Initial FSM state for chaos branching.",
+      "type": "NO_OP",
+      "mode": "SEQUENTIAL",
+      "setState": { "phase": "init" }
+    },
+
+    /* ------------------------------------------------------------
+     *  PHASE 2 — CHAOS MIX
+     * ------------------------------------------------------------ */
+
+    {
+      "id": "rapid_app_restart",
+      "description": "Force-stops and restarts the app repeatedly.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 4,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Force stopping app...'",
+          "adb shell am force-stop com.example.chaosapp",
+          "sleep 1",
+          "echo 'Restarting...'",
+          "adb shell monkey -p com.example.chaosapp -c android.intent.category.LAUNCHER 1"
+        ]
+      },
+      "metrics": {
+        "captureCpuUsage": true,
+        "captureMemoryUsage": true,
+        "captureBatteryLevel": true
+      },
+      "onFailure": "RETRY"
+    },
+
+    {
+      "id": "kill_network_temporarily",
+      "description": "Temporarily kill network connectivity.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 3,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Disabling network...'",
+          "adb shell svc wifi disable",
+          "sleep 2",
+          "adb shell svc wifi enable",
+          "echo 'Network restored'"
+        ]
+      },
+      "preconditions": {
+        "batteryAbove": 30
+      },
+      "onFailure": "LOG_ONLY"
+    },
+
+    {
+      "id": "random_reboot_storm",
+      "description": "Randomized reboot to test reboot recovery under load.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 1,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Chaos: random reboot triggered'",
+          "adb shell reboot"
+        ]
+      },
+      "causesReboot": true,
+      "waitForBoot": true,
+      "restartAppAfterBoot": true
+    },
+
+    /* ------------------------------------------------------------
+     * PHASE 3 — METRICS DRIVEN ADAPTIVE BEHAVIOR
+     * ------------------------------------------------------------ */
+
+    {
+      "id": "heavy_metrics_collector",
+      "description": "Collect aggressive levels of metrics and react to spikes.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 4,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Collecting metrics...'",
+          "echo 'CPU_SPIKE=88 MEMORY_MB=550 LATENCY_MS=1200'"
+        ]
+      },
+      "metrics": {
+        "captureCpuUsage": true,
+        "captureMemoryUsage": true,
+        "captureBatteryLevel": true,
+        "customMetrics": ["LATENCY_MS"]
+      },
+      "conditionalTriggers": [
+        {
+          "triggerEventId": "cpu_spike_handler",
+          "ifMetricAbove": { "cpuUsage": 80 }
+        },
+        {
+          "triggerEventId": "latency_handler",
+          "ifMetricAbove": { "LATENCY_MS": 1000 }
+        }
+      ]
+    },
+
+    {
+      "id": "cpu_spike_handler",
+      "description": "Take action when CPU spikes occur.",
+      "type": "SCRIPT",
+      "mode": "CONDITIONAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Handling CPU spike: reducing workload'"
+        ]
+      },
+      "setState": { "phase": "cpu_recovered" }
+    },
+
+    {
+      "id": "latency_handler",
+      "description": "Triggered when network latency is too high.",
+      "type": "SCRIPT",
+      "mode": "CONDITIONAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'High latency detected — attempting recovery...'",
+          "sleep 1"
+        ]
+      }
+    },
+
+    /* ------------------------------------------------------------
+     * PHASE 4 — DEEP NESTED SEQUENCE (DANGEROUS OPS)
+     * ------------------------------------------------------------ */
+
+    {
+      "id": "nested_sequence_parent",
+      "description": "Complex nested workflow simulating real-world chaining.",
+      "type": "SEQUENCE",
+      "mode": "RANDOM",
+      "weight": 2,
+      "sequence": ["sub_seq_1", "sub_seq_2"]
+    },
+
+    {
+      "id": "sub_seq_1",
+      "description": "Sub-sequence 1",
+      "type": "SEQUENCE",
+      "mode": "SEQUENTIAL",
+      "sequence": ["noop_a", "noop_b"]
+    },
+
+    {
+      "id": "sub_seq_2",
+      "description": "Sub-sequence 2",
+      "type": "SEQUENCE",
+      "mode": "SEQUENTIAL",
+      "sequence": ["noop_c", "dangerous_cleanup"]
+    },
+
+    { "id": "noop_a", "type": "NO_OP", "mode": "SEQUENTIAL" },
+    { "id": "noop_b", "type": "NO_OP", "mode": "SEQUENTIAL" },
+    { "id": "noop_c", "type": "NO_OP", "mode": "SEQUENTIAL" },
+
+    {
+      "id": "dangerous_cleanup",
+      "description": "High-risk cleanup task.",
+      "type": "SCRIPT",
+      "mode": "SEQUENTIAL",
+      "safetyLevel": "CRITICAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Performing high-risk cleanup...'",
+          "sleep 1"
+        ]
+      }
+    }
+  ]
+}

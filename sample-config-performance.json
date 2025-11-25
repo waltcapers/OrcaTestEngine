@@ -1,0 +1,50 @@
+{
+  "name": "Performance Stress Test",
+  "description": "Exercises CPU, memory, and battery metrics with long-running scripts.",
+  "randomSeed": 9999,
+  "runMode": "RANDOM",
+  "debug": false,
+
+  "maxTestDurationSeconds": 30,
+  "targetPackage": "com.example.app",
+
+  "events": [
+    {
+      "id": "cpu_load_sim",
+      "description": "Simulated CPU load event.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "enabled": true,
+      "weight": 5,
+
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Simulating CPU load...'",
+          "for i in {1..1000000}; do :; done"
+        ]
+      },
+
+      "durationSeconds": 3,
+      "metrics": {
+        "captureCpuUsage": true,
+        "captureMemoryUsage": true,
+        "captureBatteryLevel": true
+      }
+    },
+
+    {
+      "id": "sleep_step",
+      "description": "Simple delay for pacing.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "enabled": true,
+      "weight": 2,
+
+      "language": "SHELL",
+      "script": {
+        "inline": ["sleep 1"]
+      }
+    }
+  ]
+}

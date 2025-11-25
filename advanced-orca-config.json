@@ -1,0 +1,190 @@
+{
+  "name": "Advanced Stress Scenario",
+  "description": "Full-featured test that uses scripts, sequences, metrics, retries, preconditions, conditional triggers, and reboot recovery.",
+  "randomSeed": 987654321,
+  "runMode": "RANDOM",
+  "debug": true,
+
+  "targetPackage": "com.example.advancedapp",
+  "defaultSlowThresholdMillis": 2500,
+
+  "defaultTimeoutSeconds": 10,
+  "maxTestDurationSeconds": 1800,
+
+  "defaultRetry": {
+    "maxAttempts": 2,
+    "backoffSeconds": 3,
+    "strategy": "LINEAR"
+  },
+
+  "logcat": {
+    "enabled": true,
+    "rotateOnReboot": true,
+    "tag": "AdvancedAppTag"
+  },
+
+  "postRebootScript": "scripts/post_reboot_cleanup.sh",
+
+  "events": [
+    {
+      "id": "warmup_sequence",
+      "description": "Initial warm-up before test begins",
+      "type": "SEQUENCE",
+      "mode": "RANDOM",
+      "weight": 2,
+      "enabled": true,
+      "sequence": ["warmup_1", "warmup_2"]
+    },
+
+    {
+      "id": "warmup_1",
+      "description": "Warm-up step 1",
+      "type": "SCRIPT",
+      "mode": "SEQUENTIAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[Warmup] Step 1 starting...'",
+          "sleep 1"
+        ]
+      },
+      "args": [],
+      "metrics": {
+        "captureCpuUsage": true,
+        "captureMemoryUsage": false,
+        "captureBatteryLevel": false
+      }
+    },
+
+    {
+      "id": "warmup_2",
+      "description": "Warm-up step 2",
+      "type": "SCRIPT",
+      "mode": "SEQUENTIAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[Warmup] Step 2 executing'",
+          "sleep 1"
+        ]
+      },
+      "metrics": {
+        "captureCpuUsage": true,
+        "captureMemoryUsage": true,
+        "captureBatteryLevel": true,
+        "customMetrics": ["deviceTemp"]
+      }
+    },
+
+    {
+      "id": "network_stress",
+      "description": "Performs a network-intensive stress event",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 4,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Hitting network endpoints...'",
+          "curl -s https://example.com > /dev/null"
+        ]
+      },
+      "preconditions": {
+        "networkRequired": true,
+        "batteryAbove": 25
+      },
+      "metrics": {
+        "captureCpuUsage": true,
+        "captureMemoryUsage": true,
+        "customMetrics": ["netLatency"]
+      },
+      "onFailure": "RETRY",
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "backoffSeconds": 2,
+        "strategy": "EXPONENTIAL"
+      }
+    },
+
+    {
+      "id": "reboot_event",
+      "description": "Triggers a device reboot for resilience testing",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 1,
+      "language": "SHELL",
+      "script": {
+        "file": "scripts/reboot_device.sh"
+      },
+      "causesReboot": true,
+      "waitForBoot": true,
+      "restartAppAfterBoot": true
+    },
+
+    {
+      "id": "monitor_metrics",
+      "description": "Metrics monitoring and evaluation",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 3,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Simulating metrics output...'",
+          "echo 'CPU=72 MEMORY=340MB netLatency=400'"
+        ]
+      },
+      "metrics": {
+        "captureCpuUsage": true,
+        "captureMemoryUsage": true,
+        "captureBatteryLevel": true,
+        "customMetrics": ["netLatency"]
+      },
+      "conditionalTriggers": [
+        {
+          "triggerEventId": "metric_alert_handler",
+          "ifOutputContains": "CPU"
+        },
+        {
+          "triggerEventId": "latency_recovery",
+          "ifMetricAbove": { "netLatency": 300 }
+        }
+      ]
+    },
+
+    {
+      "id": "metric_alert_handler",
+      "description": "Handles CPU metric alerts",
+      "type": "NO_OP",
+      "mode": "CONDITIONAL",
+      "logOutput": true
+    },
+
+    {
+      "id": "latency_recovery",
+      "description": "Handles network latency problems",
+      "type": "SCRIPT",
+      "mode": "CONDITIONAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Recovering from high network latency...'",
+          "sleep 2"
+        ]
+      }
+    },
+
+    {
+      "id": "stateful_event",
+      "description": "Requires state to be set and then updates it",
+      "type": "NO_OP",
+      "mode": "RANDOM",
+      "requireState": {
+        "phase": "warmup_complete"
+      },
+      "setState": {
+        "phase": "stress_phase"
+      }
+    }
+  ]
+}
