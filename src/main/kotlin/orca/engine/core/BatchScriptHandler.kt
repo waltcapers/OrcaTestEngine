@@ -39,6 +39,7 @@
 
 package orca.engine.core
 
+import orca.engine.model.ScriptResult
 import java.io.File
 
 /**
@@ -74,7 +75,7 @@ class BatchScriptHandler : ScriptHandler {
         script: orca.engine.model.ScriptDefinition,
         args: List<String>,
         env: Map<String, String>
-    ): orca.engine.core.ScriptResult {
+    ): ScriptResult {
 
         // Load script text from inline definition or external file
         val scriptText =

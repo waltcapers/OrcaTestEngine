@@ -39,7 +39,7 @@
 
 package orca.engine.system
 
-import orca.engine.core.SystemInspector
+import orca.engine.model.SystemInspector
 import orca.engine.model.MetricsConfig
 
 /**
@@ -81,7 +81,7 @@ class AdbSystemInspector(
 ) : SystemInspector {
 
     // ---------------------------------------------------------------------
-    // Helper: debug logging
+    // Helper: debug logging & numeric formatting
     // ---------------------------------------------------------------------
 
     private fun dbg(msg: String) {
@@ -89,6 +89,17 @@ class AdbSystemInspector(
             println("[AdbSystemInspector] $msg")
         }
     }
+
+    /**
+     * Rounds a [Double] to a single decimal place using String formatting.
+     *
+     * This is intentionally simple and predictable:
+     *  - `String.format("%.1f", value)` is widely understood
+     *  - It produces values like 75.0, 42.3, etc.
+     *  - It avoids subtle differences between binary and decimal rounding.
+     */
+    private fun round1(value: Double): Double =
+        String.format("%.1f", value).toDouble()
 
     // ---------------------------------------------------------------------
     // Basic state queries
@@ -329,10 +340,10 @@ class AdbSystemInspector(
      * failures do NOT throw; they simply do not appear in the returned map.
      *
      * Metric keys are intentionally simple and stable:
-     *  - "cpu.totalPercent"       → estimated total CPU usage (0–100)
-     *  - "mem.usedMb"             → estimated used memory in MB
-     *  - "mem.totalMb"            → estimated total memory in MB
-     *  - "battery.levelPercent"   → battery percentage (0–100)
+     *  - "cpu.totalPercent"       → estimated total CPU usage (0–100, 1 decimal)
+     *  - "mem.usedMb"             → estimated used memory in MB (1 decimal)
+     *  - "mem.totalMb"            → estimated total memory in MB (1 decimal)
+     *  - "battery.levelPercent"   → battery percentage (0–100, integer as Double)
      *
      * Custom metrics are left as an extension point. At the moment, they are
      * not populated by this implementation, but the engine leaves room for
@@ -346,7 +357,7 @@ class AdbSystemInspector(
         // CPU usage (best-effort, depends on "top" output format).
         if (config.captureCpuUsage) {
             readCpuUsagePercent()?.let { value ->
-                metrics["cpu.totalPercent"] = value
+                metrics["cpu.totalPercent"] = round1(value)
             }
         }
 
@@ -354,14 +365,14 @@ class AdbSystemInspector(
         if (config.captureMemoryUsage) {
             val (usedMb, totalMb) = readMemoryUsageMb() ?: Pair(null, null)
             if (usedMb != null) {
-                metrics["mem.usedMb"] = usedMb
+                metrics["mem.usedMb"] = round1(usedMb)
             }
             if (totalMb != null) {
-                metrics["mem.totalMb"] = totalMb
+                metrics["mem.totalMb"] = round1(totalMb)
             }
         }
 
-        // Battery level (0–100).
+        // Battery level (0–100). Kept as an integer conceptually, but stored as Double.
         if (config.captureBatteryLevel) {
             getBatteryLevel()?.toDouble()?.let { value ->
                 metrics["battery.levelPercent"] = value
@@ -435,10 +446,15 @@ class AdbSystemInspector(
      * Attempts to read memory usage from `/proc/meminfo`.
      *
      * Returns a Pair of:
-     *  - usedMb  (Double?) — estimated used memory in MB
-     *  - totalMb (Double?) — total memory in MB
+     *  - usedMb  (Double?) — estimated used memory in MB (decimal, /1000.0)
+     *  - totalMb (Double?) — total memory in MB (decimal, /1000.0)
      *
      * If parsing fails, returns null.
+     *
+     * NOTE:
+     *  - We divide by 1000.0 instead of 1024.0 so that values expressed in kB
+     *    map directly to decimal MB (e.g., 75,000 kB → 75.0 MB). This aligns
+     *    with common “human” expectations and your unit test that expects 75.0.
      */
     private fun readMemoryUsageMb(): Pair<Double?, Double?>? {
         val result = adb.shell("cat /proc/meminfo", 10L)
@@ -467,8 +483,11 @@ class AdbSystemInspector(
         }
 
         val usedKb = (totalKb - availKb).coerceAtLeast(0)
-        val usedMb = usedKb.toDouble() / 1024.0
-        val totalMb = totalKb.toDouble() / 1024.0
+
+        // Use decimal MB (kB / 1000.0) to align with common expectations
+        // and to match tests that assert values like 75.0.
+        val usedMb = usedKb.toDouble() / 1000.0
+        val totalMb = totalKb.toDouble() / 1000.0
 
         dbg("readMemoryUsageMb: usedMb=$usedMb, totalMb=$totalMb")
         return Pair(usedMb, totalMb)

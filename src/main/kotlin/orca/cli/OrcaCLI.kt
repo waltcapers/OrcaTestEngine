@@ -36,206 +36,473 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
 package orca.cli
 
-import orca.engine.config.StressConfigLoader
-import orca.engine.core.OrcaEngine
-import orca.engine.logging.ConsoleEngineLogger
-import orca.engine.system.AdbSystemInspector
-import orca.engine.system.DefaultAdbExecutor
-import orca.engine.system.DefaultSystemInspector
-import java.io.File
+import orca.cli.util.Ansi
+import kotlin.system.exitProcess
+
+// ==========================================================================================
+//  GLOBAL OPTION MODEL & CONTEXT
+// ==========================================================================================
+
+data class GlobalCliOptions(
+    val deviceId: String? = null,
+    val seedOverride: Long? = null,
+    val logFile: String? = null,
+    val debug: Boolean = false,
+    val timeoutMs: Long? = null,
+    val colorEnabled: Boolean = true,
+    val artifactsDir: String? = null,
+    val helpRequested: Boolean = false
+)
 
 /**
- * Top-level command-line entrypoint for the OrcaTestEngine.
- *
- * This object is intentionally very small: it just parses arguments and
- * delegates to specific command handlers (RunCommand, DryRunCommand, etc.).
- *
- * Suggested usage from the command line (once packaged as an app/JAR):
- *
- *   # Run a configuration
- *   orca run orca-config.json
- *
- *   # Validate configuration ONLY (no execution)
- *   orca validate orca-config.json
- *
- *   # Replay last failing run
- *   orca replay
- *
- *   # View events and configuration without executing anything
- *   orca dry-run orca-config.json
- *   orca list-events orca-config.json
- *   orca explain-event orca-config.json noop_1
- *
- *   # Check ADB connectivity and basic device state
- *   orca detect-adb
- *
- *   # Run a single event in isolation
- *   orca run-event orca-config.json noop_1 [iterations]
- *
- *   # Run and rely on OrcaEngine's summary as a “profile”
- *   orca profile orca-config.json [iterations]
- *
- *   # Print the JSON schema
- *   orca dump-schema [optional-output-path]
+ * Commands (RunCommand, ProfileCommand, etc.) can read the parsed options from here.
  */
+object OrcaCliContextHolder {
+    @Volatile
+    var globalOptions: GlobalCliOptions = GlobalCliOptions()
+}
+
+/** Internal struct: parse result */
+private data class ParsedArgs(
+    val options: GlobalCliOptions,
+    val command: String,
+    val commandArgs: List<String>
+)
+
+// ==========================================================================================
+//  MAIN CLI ENTRYPOINT
+// ==========================================================================================
+
 object OrcaCLI {
 
-    /**
-     * Main entrypoint used when launching from a CLI context.
-     *
-     * You can either:
-     *  - configure Gradle to use this as the application's main class, OR
-     *  - call OrcaCLI.main(args) from your existing main.kt.
-     */
+    private const val ORCA_VERSION: String = "0.2.0-SNAPSHOT"
+
     @JvmStatic
     fun main(args: Array<String>) {
-
-        // If no arguments are provided, show usage and exit.
         if (args.isEmpty()) {
             printUsage()
             return
         }
 
-        // First token is the subcommand (run, validate, replay, etc.)
-        val cmd = args[0]
+        val parsed = try {
+            parseArgs(args)
+        } catch (e: IllegalArgumentException) {
+            val opts = OrcaCliContextHolder.globalOptions
+            printError(e.message ?: "Invalid arguments.", opts)
+            println()
+            printUsage()
+            exitProcess(1)
+        }
 
-        when (cmd) {
-            // -----------------------------------------------------------------
-            // Existing “core” commands
-            // -----------------------------------------------------------------
+        if (parsed.options.helpRequested && parsed.command.isEmpty()) {
+            printUsage()
+            return
+        }
 
-            "run" -> {
-                if (args.size < 2) {
-                    println("❌ Missing config file argument.")
+        if (parsed.command.isEmpty()) {
+            val opts = parsed.options
+            printError("Missing command.", opts)
+            println()
+            printUsage()
+            exitProcess(1)
+        }
+
+        val finalOptions = prepareRunArtifactsDirIfNeeded(parsed.options, parsed.command)
+
+        exitProcess(dispatch(parsed.command, parsed.commandArgs, finalOptions))
+    }
+
+    // ======================================================================================
+    //  OPTION C FLAG PARSING (FLAGS ANYWHERE)
+    // ======================================================================================
+
+    private fun parseArgs(args: Array<String>): ParsedArgs {
+
+        var deviceId: String? = null
+        var seedOverride: Long? = null
+        var logFile: String? = null
+        var timeoutMs: Long? = null
+        var debug = false
+        var colorEnabled = true
+        var artifactsDir: String? = null
+        var helpRequested = false
+
+        val tokens = args.toMutableList()
+
+        val commandIndex = tokens.indexOfFirst { !it.startsWith("-") }
+        if (commandIndex == -1) {
+            throw IllegalArgumentException("No command found.")
+        }
+
+        val command = tokens[commandIndex]
+        val commandArgs = mutableListOf<String>()
+
+        var i = 0
+        while (i < tokens.size) {
+            val t = tokens[i]
+
+            if (i == commandIndex) {
+                i++
+                continue
+            }
+
+            when (t) {
+                "--device" -> {
+                    if (i + 1 >= tokens.size) throw IllegalArgumentException("Missing value for --device")
+                    deviceId = tokens[i + 1]
+                    i += 2
+                    continue
+                }
+
+                "--seed" -> {
+                    if (i + 1 >= tokens.size) throw IllegalArgumentException("Missing value for --seed")
+                    seedOverride = tokens[i + 1].toLongOrNull()
+                        ?: throw IllegalArgumentException("Invalid --seed value '${tokens[i + 1]}'")
+                    i += 2
+                    continue
+                }
+
+                "--log-file" -> {
+                    if (i + 1 >= tokens.size) throw IllegalArgumentException("Missing value for --log-file")
+                    logFile = tokens[i + 1]
+                    i += 2
+                    continue
+                }
+
+                "--timeout-ms" -> {
+                    if (i + 1 >= tokens.size) throw IllegalArgumentException("Missing value for --timeout-ms")
+                    timeoutMs = tokens[i + 1].toLongOrNull()
+                        ?: throw IllegalArgumentException("Invalid --timeout-ms '${tokens[i + 1]}'")
+                    i += 2
+                    continue
+                }
+
+                "--artifacts-dir" -> {
+                    if (i + 1 >= tokens.size) throw IllegalArgumentException("Missing value for --artifacts-dir")
+                    artifactsDir = tokens[i + 1]
+                    i += 2
+                    continue
+                }
+
+                "--debug" -> {
+                    debug = true
+                    i++
+                    continue
+                }
+
+                "--no-color" -> {
+                    colorEnabled = false
+                    i++
+                    continue
+                }
+
+                "--help", "-h" -> {
+                    helpRequested = true
+                    i++
+                    continue
+                }
+
+                else -> {
+                    if (!t.startsWith("-") && i != commandIndex) {
+                        commandArgs += t
+                    }
+                    i++
+                }
+            }
+        }
+
+        val artifactsRoot = artifactsDir ?: run {
+            val home = System.getProperty("user.home")
+            java.io.File(home, ".orca/artifacts").absolutePath
+        }
+
+        val opts = GlobalCliOptions(
+            deviceId = deviceId,
+            seedOverride = seedOverride,
+            logFile = logFile,
+            debug = debug,
+            timeoutMs = timeoutMs,
+            colorEnabled = colorEnabled,
+            artifactsDir = artifactsRoot,
+            helpRequested = helpRequested
+        )
+
+        OrcaCliContextHolder.globalOptions = opts
+
+        return ParsedArgs(opts, command, commandArgs)
+    }
+
+    private fun prepareRunArtifactsDirIfNeeded(
+        baseOptions: GlobalCliOptions,
+        command: String
+    ): GlobalCliOptions {
+
+        val isRunLike = when (command) {
+            "run", "dry-run", "profile", "run-event", "replay" -> true
+            else -> false
+        }
+
+        if (!isRunLike || baseOptions.artifactsDir == null) return baseOptions
+
+        val root = java.io.File(baseOptions.artifactsDir)
+        if (!root.exists()) root.mkdirs()
+
+        val timestamp = java.time.LocalDateTime.now()
+            .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))
+
+        val runDir = java.io.File(root, "${command}_$timestamp")
+        runDir.mkdirs()
+
+        return baseOptions.copy(artifactsDir = runDir.absolutePath)
+    }
+
+    // ======================================================================================
+    //  COMMAND DISPATCH + COLORIZED STATUS OUTPUT
+    // ======================================================================================
+
+    private fun dispatch(
+        command: String,
+        args: List<String>,
+        opts: GlobalCliOptions
+    ): Int {
+
+        OrcaCliContextHolder.globalOptions = opts
+
+        return try {
+            when (command) {
+
+                "run" -> {
+                    if (args.isEmpty()) {
+                        printError("Missing config file.", opts); printUsage(); 1
+                    } else {
+                        println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Running ${args[0]}…", opts.colorEnabled))
+                        RunCommand.run(args[0])
+                        println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} run complete.", opts.colorEnabled))
+                        0
+                    }
+                }
+
+                "validate" -> {
+                    if (args.isEmpty()) {
+                        printError("Missing config file.", opts); printUsage(); 1
+                    } else {
+                        println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Validating ${args[0]}…", opts.colorEnabled))
+                        ValidateCommand.run(args[0])
+                        println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} Validation passed.", opts.colorEnabled))
+                        0
+                    }
+                }
+
+                "replay" -> {
+                    println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Starting deterministic replay…", opts.colorEnabled))
+                    ReplayCommand.run()
+                    println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} Replay finished.", opts.colorEnabled))
+                    0
+                }
+
+                "dry-run" -> {
+                    if (args.isEmpty()) {
+                        printError("Missing config file.", opts); printUsage(); 1
+                    } else {
+                        println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Dry-run for ${args[0]}…", opts.colorEnabled))
+                        DryRunCommand.run(args[0])
+                        println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} Dry-run complete.", opts.colorEnabled))
+                        0
+                    }
+                }
+
+                "list-events" -> {
+                    if (args.isEmpty()) {
+                        printError("Missing config file.", opts); printUsage(); 1
+                    } else {
+                        println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Listing events…", opts.colorEnabled))
+                        ListEventsCommand.run(args[0])
+                        0
+                    }
+                }
+
+                "explain-event" -> {
+                    if (args.size < 2) {
+                        printError("Usage: orca explain-event <config> <eventId>", opts); return 1
+                    }
+                    println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Explaining '${args[1]}'…", opts.colorEnabled))
+                    ExplainEventCommand.run(args[0], args[1])
+                    0
+                }
+
+                "detect-adb" -> {
+                    println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Detecting adb…", opts.colorEnabled))
+                    DetectAdbCommand.run()
+                    0
+                }
+
+                "run-event" -> {
+                    if (args.size < 2) {
+                        printError("Usage: orca run-event <config> <eventId> [n]", opts); return 1
+                    }
+                    val iters = args.getOrNull(2)?.toIntOrNull() ?: 1
+                    println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Running '${args[1]}' $iters times…", opts.colorEnabled))
+                    RunEventCommand.run(args[0], args[1], iters)
+                    println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} run-event complete.", opts.colorEnabled))
+                    0
+                }
+
+                "profile" -> {
+                    if (args.isEmpty()) {
+                        printError("Usage: orca profile <config> [n]", opts); return 1
+                    }
+                    val iters = args.getOrNull(1)?.toIntOrNull() ?: 100
+                    println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Profiling ${args[0]} for $iters iterations…", opts.colorEnabled))
+                    ProfileCommand.run(args[0], iters)
+                    println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} Profile run complete.", opts.colorEnabled))
+                    0
+                }
+
+                "dump-schema" -> {
+                    val out = args.firstOrNull()
+                    println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Dumping schema…", opts.colorEnabled))
+                    DumpSchemaCommand.run(out)
+                    println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} Schema dump complete.", opts.colorEnabled))
+                    0
+                }
+
+                "interactive" -> {
+                    InteractiveShell.run(opts)
+                    0
+                }
+
+                "version" -> {
+                    println("OrcaTestEngine version $ORCA_VERSION")
+                    0
+                }
+
+                "help", "--help", "-h" -> {
                     printUsage()
-                    return
+                    0
                 }
-                RunCommand.run(args[1])
-            }
 
-            "validate" -> {
-                if (args.size < 2) {
-                    println("❌ Missing config file argument.")
+                else -> {
+                    printError("Unknown command: '$command'", opts)
                     printUsage()
-                    return
+                    1
                 }
-                ValidateCommand.run(args[1])
             }
-
-            "replay" -> {
-                // Simple replay: assumes replay_state.json in current directory.
-                ReplayCommand.run()
-            }
-
-            // -----------------------------------------------------------------
-            // NEW: Analysis / inspection / tooling commands
-            // -----------------------------------------------------------------
-
-            "dry-run" -> {
-                if (args.size < 2) {
-                    println("❌ Missing config file argument.")
-                    printUsage()
-                    return
-                }
-                DryRunCommand.run(args[1])
-            }
-
-            "list-events" -> {
-                if (args.size < 2) {
-                    println("❌ Missing config file argument.")
-                    printUsage()
-                    return
-                }
-                ListEventsCommand.run(args[1])
-            }
-
-            "explain-event" -> {
-                if (args.size < 3) {
-                    println("❌ Usage: orca explain-event <config.json> <eventId>")
-                    return
-                }
-                ExplainEventCommand.run(configPath = args[1], eventId = args[2])
-            }
-
-            "detect-adb" -> {
-                DetectAdbCommand.run()
-            }
-
-            "run-event" -> {
-                if (args.size < 3) {
-                    println("❌ Usage: orca run-event <config.json> <eventId> [iterations]")
-                    return
-                }
-                val configPath = args[1]
-                val eventId = args[2]
-                val iterations =
-                    if (args.size >= 4) args[3].toIntOrNull() ?: 1 else 1
-                RunEventCommand.run(configPath, eventId, iterations)
-            }
-
-            "profile" -> {
-                if (args.size < 2) {
-                    println("❌ Usage: orca profile <config.json> [iterations]")
-                    return
-                }
-                val configPath = args[1]
-                val iterations =
-                    if (args.size >= 3) args[2].toIntOrNull() ?: 100 else 100
-                ProfileCommand.run(configPath, iterations)
-            }
-
-            "dump-schema" -> {
-                val outputPath = if (args.size >= 2) args[1] else null
-                DumpSchemaCommand.run(outputPath)
-            }
-
-            "help", "-h", "--help" -> printUsage()
-
-            else -> {
-                println("❌ Unknown command: $cmd\n")
-                printUsage()
-            }
+        } catch (t: Throwable) {
+            printError("Unhandled error: ${t.message}", opts)
+            if (opts.debug) t.printStackTrace()
+            1
         }
     }
 
-    /**
-     * Prints a concise usage guide for all supported CLI commands.
-     */
+    // ======================================================================================
+    //  INTERACTIVE SHELL
+    // ======================================================================================
+
+    private object InteractiveShell {
+
+        fun run(sessionOpts: GlobalCliOptions) {
+            println(
+                Ansi.cyan(
+                    Ansi.bold("Entering Orca interactive mode. Type 'help' or 'exit'.", sessionOpts.colorEnabled),
+                    sessionOpts.colorEnabled
+                )
+            )
+
+            val reader = System.`in`.bufferedReader()
+
+            while (true) {
+                print(Ansi.green("${Ansi.promptSymbol(sessionOpts.colorEnabled)} ", sessionOpts.colorEnabled))
+                val line = reader.readLine() ?: break
+                val trimmed = line.trim()
+                if (trimmed.isEmpty()) continue
+
+                if (trimmed.equals("exit", true) || trimmed.equals("quit", true)) break
+
+                if (trimmed.equals("help", true)) {
+                    printUsage()
+                    continue
+                }
+
+                val tokens = tokenize(trimmed)
+                try {
+                    val parsed = parseArgs(tokens.toTypedArray())
+                    dispatch(parsed.command, parsed.commandArgs, parsed.options)
+                } catch (e: IllegalArgumentException) {
+                    printError(e.message ?: "Invalid command.", sessionOpts)
+                }
+            }
+
+            println(Ansi.gray("Exiting interactive mode.", sessionOpts.colorEnabled))
+        }
+
+        private fun tokenize(s: String): List<String> {
+            val result = mutableListOf<String>()
+            val sb = StringBuilder()
+            var inQuotes = false
+
+            for (c in s) {
+                when {
+                    c == '"' -> inQuotes = !inQuotes
+                    c.isWhitespace() && !inQuotes -> {
+                        if (sb.isNotEmpty()) {
+                            result += sb.toString()
+                            sb.clear()
+                        }
+                    }
+                    else -> sb.append(c)
+                }
+            }
+            if (sb.isNotEmpty()) result += sb.toString()
+            return result
+        }
+    }
+
+    // ======================================================================================
+    //  HELP & ERROR MESSAGES
+    // ======================================================================================
+
     private fun printUsage() {
-        println(
-            """
-            OrcaTestEngine CLI
+        val opts = OrcaCliContextHolder.globalOptions
 
-            Usage:
-              orca run <config.json>
-              orca validate <config.json>
-              orca replay
+        println(Ansi.cyan(Ansi.bold("\nOrcaTestEngine CLI"), opts.colorEnabled))
+        println(Ansi.yellow("Usage:", opts.colorEnabled))
+        println("  orca [flags] <command> [args]\n")
 
-              orca dry-run <config.json>
-              orca list-events <config.json>
-              orca explain-event <config.json> <eventId>
+        println(Ansi.blue("Global Flags:", opts.colorEnabled))
+        println("  --device <id>          Target Android device/emulator")
+        println("  --seed <num>           Override RNG seed")
+        println("  --log-file <path>      Output logs here")
+        println("  --timeout-ms <num>     Optional max time")
+        println("  --artifacts-dir <path> Artifact output root directory")
+        println("  --debug                Verbose logging")
+        println("  --no-color             Disable ANSI output")
+        println("  --help, -h             Show help\n")
 
-              orca detect-adb
-              orca run-event <config.json> <eventId> [iterations]
-              orca profile <config.json> [iterations]
-              orca dump-schema [output-path]
+        println(Ansi.blue("Commands:", opts.colorEnabled))
+        println("  run <cfg>              Execute full stress test")
+        println("  validate <cfg>         Validate config schema")
+        println("  replay                 Replay last failure deterministically")
+        println("  dry-run <cfg>          Print events without running")
+        println("  list-events <cfg>      List event definitions")
+        println("  explain-event <c> <id> Explain a single event")
+        println("  detect-adb             Check adb/device availability")
+        println("  run-event <c> <id> [n] Execute one event")
+        println("  profile <c> [n]        Weighted selection profile")
+        println("  dump-schema [path]     Output JSON schema to file/console")
+        println("  interactive            Enter interactive REPL")
+        println("  version                Show version info")
+        println("  help                   Show help\n")
 
-            Notes:
-              - "run" executes the full test according to the config file.
-              - "validate" checks the config against the JSON schema only.
-              - "replay" replays the last failing run using replay_state.json.
-              - "dry-run" prints what would execute, but does not run anything.
-              - "list-events" shows all defined events in the configuration.
-              - "explain-event" prints details about a single event.
-              - "detect-adb" checks whether ADB is reachable and basic state.
-              - "run-event" isolates a single event and executes it.
-              - "profile" runs multiple iterations and relies on OrcaEngine's
-                built-in summary to show selection distribution.
-              - "dump-schema" prints or writes the JSON schema used for validation.
-            """.trimIndent()
-        )
+        println(Ansi.gray("Examples:", opts.colorEnabled))
+        println("  orca run config.json --device emulator-5554")
+        println("  orca validate config.json")
+        println("  orca run config.json --timeout-ms 30000")
+        println()
+    }
+
+    private fun printError(msg: String, opts: GlobalCliOptions) {
+        println(Ansi.red("${Ansi.errorSymbol(opts.colorEnabled)} $msg", opts.colorEnabled))
     }
 }

@@ -40,6 +40,7 @@
 package orca.engine.core
 
 import orca.engine.model.ScriptDefinition
+import orca.engine.model.ScriptResult
 
 /**
  * Base interface for all script execution handlers used by the OrcaEngine.
@@ -55,7 +56,7 @@ import orca.engine.model.ScriptDefinition
  * - Receive the parsed [ScriptDefinition] from the event.
  * - Build an execution command appropriate for the script type.
  * - Execute the script via [ProcessUtils.runProcess].
- * - Return a [ScriptResult] containing:
+ * - Return a [orca.engine.model.ScriptResult] containing:
  *   - exit code
  *   - stdout/stderr output
  *   - any collected execution metrics
@@ -67,7 +68,7 @@ import orca.engine.model.ScriptDefinition
  *
  * @see StressEvent
  * @see ScriptDefinition
- * @see ScriptResult
+ * @see orca.engine.model.ScriptResult
  * @see ProcessUtils.runProcess
  */
 interface ScriptHandler {

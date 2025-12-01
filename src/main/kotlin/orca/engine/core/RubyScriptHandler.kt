@@ -39,7 +39,7 @@
 
 import orca.engine.core.ProcessUtils
 import orca.engine.core.ScriptHandler
-import orca.engine.core.ScriptResult
+import orca.engine.model.ScriptResult
 import orca.engine.model.ScriptDefinition
 import java.io.File
 

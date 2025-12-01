@@ -40,6 +40,7 @@
 package orca.engine.core
 
 import orca.engine.model.ScriptDefinition
+import orca.engine.model.ScriptResult
 import java.io.File
 
 /**
@@ -74,7 +75,7 @@ import java.io.File
  * @see ScriptDefinition
  * @see ScriptHandler
  * @see ProcessUtils
- * @see ScriptResult
+ * @see orca.engine.model.ScriptResult
  */
 class ShellScriptHandler : ScriptHandler {
 
@@ -84,7 +85,7 @@ class ShellScriptHandler : ScriptHandler {
      * @param script the script definition containing inline or file-based content
      * @param args the argument list passed to the script
      * @param env the environment variables exposed to the script's process
-     * @return a [ScriptResult] representing exit status, stdout, stderr, and metrics
+     * @return a [orca.engine.model.ScriptResult] representing exit status, stdout, stderr, and metrics
      */
     override fun execute(
         script: ScriptDefinition,

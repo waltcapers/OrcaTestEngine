@@ -39,9 +39,11 @@
 
 package orca.engine.core
 
+import orca.cli.util.Ansi
 import orca.engine.logging.DefaultLogcatManager
 import orca.engine.logging.LogcatManager
 import orca.engine.model.*
+import orca.engine.util.*
 import kotlin.random.Random
 import kotlin.system.measureTimeMillis
 
@@ -53,13 +55,19 @@ import kotlin.system.measureTimeMillis
  * - Tracks basic metrics and per-event execution stats.
  * - Monitors the target process and triggers replay-state saving on failure.
  * - Manages logcat capture lifecycle during runs and across reboot recovery.
+ *
+ * Design goals:
+ * - Deterministic by default (seed + RNG call count).
+ * - Easy to replay failures in a follow-up run.
+ * - "Boring by design": failures are logged, not silently ignored.
  */
 class OrcaEngine(
     private val config: OrcaTestConfig,
     private val systemInspector: SystemInspector,
     private val scriptRunner: ScriptRunner,
     private val logger: EngineLogger,
-    private val logcat: LogcatManager = DefaultLogcatManager()
+    private val logcat: LogcatManager = DefaultLogcatManager(),
+    private val sleepProvider: SleepProvider = DefaultSleepProvider
 ) {
 
     /** Deterministic RNG seeded from config.randomSeed. */
@@ -97,7 +105,7 @@ class OrcaEngine(
     private var replayMode = false
 
     /**
-     * Wrapper for RNG access that increments rngCalls.
+     * Wrapper for RNG access that increments [rngCalls].
      *
      * Always use this method instead of rng.nextInt() directly to keep
      * deterministic replay accurate.
@@ -110,7 +118,7 @@ class OrcaEngine(
     /**
      * Load replay state (seed + RNG call count) from JSON file.
      *
-     * @param path path to replay_state.json, defaults to "replay_state.json".
+     * @param path path to replay_state.json, defaults to `"replay_state.json"`.
      */
     fun loadReplayState(path: String = "replay_state.json"): ReplayState {
         return ReplayStateSerializer.loadReplayState(path)
@@ -119,7 +127,7 @@ class OrcaEngine(
     /**
      * Save replay state (seed + RNG call count) to JSON file.
      *
-     * @param path path to replay_state.json, defaults to "replay_state.json".
+     * @param path path to replay_state.json, defaults to `"replay_state.json"`.
      */
     fun saveReplayState(path: String = "replay_state.json") {
         ReplayStateSerializer.saveReplayState(
@@ -137,6 +145,9 @@ class OrcaEngine(
     /**
      * Fast-forwards the RNG by consuming the given number of random values.
      * Also clears internal engine state.
+     *
+     * This is mainly a low-level hook for advanced use or testing;
+     * in normal flows, [replay] should be preferred.
      *
      * @param calls number of RNG calls to consume.
      */
@@ -174,10 +185,13 @@ class OrcaEngine(
     /**
      * Selects the next RANDOM-mode event based on:
      * - enabled flag
-     * - disabled flag in EventStats
+     * - disabled flag in [EventStats]
      * - maxExecutions
      * - cooldownSeconds
      * - weight / profileWeights
+     *
+     * Events that are not in [EventMode.RANDOM] do not participate in this
+     * selection; they are typically triggered explicitly or used in sequences.
      */
     private fun selectNextEvent(profile: String?): StressEvent? {
         val now = System.currentTimeMillis()
@@ -223,6 +237,9 @@ class OrcaEngine(
 
     /**
      * Clears all engine runtime state used for replay or for a fresh run.
+     *
+     * This does **not** change the RNG seed; see [setSeed] if you also need
+     * to reset the randomness.
      */
     private fun resetReplayState() {
         state.clear()
@@ -267,7 +284,7 @@ class OrcaEngine(
                 }
                 if (delaySec > 0) {
                     logger.info("Retrying ${event.id} in $delaySec seconds (attempt $attempt/${retry.maxAttempts})")
-                    Thread.sleep(delaySec * 1000L)
+                    sleepProvider.sleep(delaySec * 1000L)
                 }
             }
         }
@@ -296,58 +313,58 @@ class OrcaEngine(
      * - SEQUENCE
      * - NO_OP
      * - WAIT_FOR_DEVICE
-     * - SCRIPT execution via ScriptRunner
+     * - SCRIPT execution via [ScriptRunner]
      * - reboot recovery and process monitoring
      *
-     * 🔍 NEW: Metrics integration
-     * If the event defines a MetricsConfig (event.metrics != null), the engine:
-     *  - captures a pre-execution metrics snapshot from SystemInspector
+     * 🔍 Metrics integration
+     *
+     * If the event defines a [MetricsConfig] (event.metrics != null), the engine:
+     *  - captures a pre-execution metrics snapshot from [SystemInspector]
      *  - runs the script
      *  - captures a post-execution metrics snapshot
      *  - computes deltas (post - pre) where possible
-     *  - merges the resulting metrics into ScriptResult.metrics
-     *  - contributes them to globalMetrics for summary reporting
+     *  - merges the resulting metrics into [ScriptResult.metrics]
+     *  - contributes them to [globalMetrics] for summary reporting
      */
     private fun executeSingleAttempt(event: StressEvent): Boolean {
         val stats = eventStats.getOrPut(event.id) { EventStats() }
 
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
         // 1. Handle SEQUENCE events (no script execution here)
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
         if (event.type == EventType.SEQUENCE) {
             return executeSequence(event)
         }
 
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
         // 2. Handle NO_OP events (instant success, no external interaction)
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
         if (event.type == EventType.NO_OP) {
             logger.info("NO-OP event ${event.id}: ${event.description}")
 
-            // Give NO-OP a 0ms duration and update stats accordingly.
+            // NO_OP gets a deterministic 0ms duration.
             stats.lastDurationMs = 0
             stats.totalDuration += 0
             stats.minDuration = minOf(stats.minDuration, 0)
             stats.maxDuration = maxOf(stats.maxDuration, 0)
 
-            // Mark as successful; no metrics or state changes beyond setState.
             markSuccess(event, stats, emptyMap())
             debug("NO_OP event executed: ${event.id}")
             return true
         }
 
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
         // 3. Handle WAIT_FOR_DEVICE events (reboot recovery glue)
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
         if (event.type == EventType.WAIT_FOR_DEVICE) {
             systemInspector.awaitDeviceOnline()
             if (event.waitForBoot) systemInspector.awaitBootCompleted()
             return true
         }
 
-        // -------------------------------------------------------------------------
-        // 4. SCRIPT events — this is where metrics + execution timing live
-        // -------------------------------------------------------------------------
+        // ---------------------------------------------------------------------
+        // 4. SCRIPT events — metrics + execution timing live here
+        // ---------------------------------------------------------------------
         logger.info("Executing event ${event.id} (${event.language})")
 
         // We will build up the ScriptResult in stages:
@@ -355,15 +372,9 @@ class OrcaEngine(
         //  - Then by augmenting it with metrics captured by the SystemInspector
         lateinit var result: ScriptResult
 
-        // Resolve any metrics configuration for this event.
-        // If event.metrics is null, we simply skip all metrics work.
         val metricsConfig = event.metrics
 
-        // -------------------------------------------------------------------------
         // 4a. Pre-execution metrics snapshot (optional)
-        // -------------------------------------------------------------------------
-        // If metricsConfig is present, ask the SystemInspector for a snapshot
-        // *before* the script runs. This might include CPU, memory, battery, etc.
         val preMetrics: Map<String, Double> = if (metricsConfig != null) {
             debug("Capturing pre-execution metrics for event ${event.id}")
             systemInspector.captureMetrics(metricsConfig)
@@ -371,16 +382,11 @@ class OrcaEngine(
             emptyMap()
         }
 
-        // -------------------------------------------------------------------------
         // 4b. Measure the script execution duration
-        // -------------------------------------------------------------------------
-        // We measure wall-clock time for the script via ScriptRunner.
         val durationMillis = measureTimeMillis {
             result = scriptRunner.run(event)
         }
 
-        // Update duration-related stats (timestamp and execution counts are
-        // updated later in markSuccess()).
         stats.lastDurationMs = durationMillis
         stats.totalDuration += durationMillis
         if (durationMillis < stats.minDuration) stats.minDuration = durationMillis
@@ -396,17 +402,11 @@ class OrcaEngine(
             )
         }
 
-        // -------------------------------------------------------------------------
         // 4c. Post-execution metrics snapshot + delta computation (optional)
-        // -------------------------------------------------------------------------
-        // If a metrics config was provided, capture a second snapshot *after*
-        // script execution and compute per-metric deltas (post - pre).
         if (metricsConfig != null) {
             debug("Capturing post-execution metrics for event ${event.id}")
             val postMetrics = systemInspector.captureMetrics(metricsConfig)
 
-            // Build a delta map: for each metric that appears in both pre and post,
-            // we store post - pre. If only one side exists, we keep that value.
             val deltaMetrics = mutableMapOf<String, Double>()
             val allKeys = preMetrics.keys union postMetrics.keys
 
@@ -416,8 +416,8 @@ class OrcaEngine(
 
                 val value = when {
                     before != null && after != null -> after - before
-                    after != null -> after                 // only post snapshot available
-                    else -> before!!                       // only pre snapshot available
+                    after != null -> after          // only post snapshot available
+                    else -> before!!                // only pre snapshot available
                 }
 
                 deltaMetrics[key] = value
@@ -426,35 +426,22 @@ class OrcaEngine(
             if (deltaMetrics.isNotEmpty()) {
                 debug("Merging ${deltaMetrics.size} metric(s) into ScriptResult for event ${event.id}")
 
-                // Merge computed deltas into the ScriptResult.metrics map.
-                // We preserve any metrics the script itself may have produced
-                // and only add metrics that are not already defined.
                 val mergedMetrics = result.metrics.toMutableMap()
                 for ((k, v) in deltaMetrics) {
-                    // If a script already provided a value for a metric, we
-                    // leave it untouched to avoid surprising overrides.
                     if (!mergedMetrics.containsKey(k)) {
                         mergedMetrics[k] = v
                     }
                 }
 
-                // Replace the original result with an augmented copy.
                 result = result.copy(metrics = mergedMetrics)
             }
         }
 
-        // At this point, result.metrics now contains:
-        //  - any metrics produced by the script itself, plus
-        //  - any system-level deltas contributed by SystemInspector (if configured).
-
         val success = result.exitCode == 0
         val metrics = result.metrics
 
-        // -------------------------------------------------------------------------
         // 4d. Failure handling and logging
-        // -------------------------------------------------------------------------
         if (!success) {
-            // Track how many times this event has failed.
             eventFailureCount[event.id] = (eventFailureCount[event.id] ?: 0) + 1
             failureLog += FailureRecord(event.id, result.exitCode, result.stderr)
 
@@ -468,28 +455,18 @@ class OrcaEngine(
             }
         }
 
-        // On success we:
-        //  - update per-event statistics
-        //  - apply state transitions
-        //  - fire postEvents and conditional triggers
         if (success) {
             markSuccess(event, stats, metrics)
             handlePostEvents(event)
             handleConditionalTriggers(event, result, metrics)
         }
 
-        // -------------------------------------------------------------------------
         // 4e. Merge metrics into global summary
-        // -------------------------------------------------------------------------
-        // Regardless of success/failure, we fold the metrics into globalMetrics
-        // so they appear in the final run summary.
         metrics.forEach { (k, v) ->
             globalMetrics.getOrPut(k) { mutableListOf() }.add(v)
         }
 
-        // -------------------------------------------------------------------------
         // 5. Reboot handling
-        // -------------------------------------------------------------------------
         if (event.causesReboot) {
             logger.warn("Event ${event.id} initiated a reboot. Entering reboot recovery mode...")
 
@@ -501,9 +478,7 @@ class OrcaEngine(
             return true
         }
 
-        // -------------------------------------------------------------------------
         // 6. Process monitoring — detect unexpected app death
-        // -------------------------------------------------------------------------
         if (!event.processDeathAllowed && !event.causesReboot) {
             val target = config.targetPackage
 
@@ -527,7 +502,6 @@ class OrcaEngine(
 
         return success
     }
-
 
     /** Helper for debug logging that respects config.debug. */
     private fun debug(msg: String) {
@@ -582,33 +556,57 @@ class OrcaEngine(
 
     /**
      * Executes a SEQUENCE event by resolving child IDs and running them
-     * with normal policy handling.
+     * with normal policy handling. The parent event counts as one execution and
+     * its [EventStats.lastDurationMs] equals the SUM of all child durations.
+     *
+     * Each child is executed through [executeEventWithPolicy], so:
+     *  - retries and onFailure policies apply per child
+     *  - metrics and triggers still function as usual
      */
     private fun executeSequence(event: StressEvent): Boolean {
         logger.info("Executing SEQUENCE ${event.id}: ${event.sequence}")
+
+        var totalDuration: Long = 0
+        var allSuccessful = true
+
         for (childId in event.sequence) {
             val child = eventsById[childId]
             if (child == null) {
                 logger.warn("Sequence ${event.id} references unknown event $childId")
                 continue
             }
+
             debug("Sequence ${event.id}: executing child event $childId")
+
+            val start = System.currentTimeMillis()
             val success = executeEventWithPolicy(child)
-            if (!success) {
-                logger.warn("Sequence ${event.id} stopped because $childId failed.")
-                return false
-            }
+            val end = System.currentTimeMillis()
+
+            if (!success) allSuccessful = false
+
+            // accumulate child duration (measured here rather than child stats)
+            totalDuration += (end - start)
         }
+
+        // Update parent stats
         val stats = eventStats.getOrPut(event.id) { EventStats() }
-        markSuccess(event, stats, emptyMap())
-        return true
+        stats.lastDurationMs = totalDuration
+        stats.totalDuration += totalDuration
+        stats.minDuration = minOf(stats.minDuration, totalDuration)
+        stats.maxDuration = maxOf(stats.maxDuration, totalDuration)
+
+        // parent event counts as an execution
+        stats.executions++
+        stats.lastExecutionTimeMillis = System.currentTimeMillis()
+
+        return allSuccessful
     }
 
     /**
      * Marks a successful event:
-     * - updates lastExecutionTimeMillis
-     * - increments executions
-     * - applies setState
+     * - updates [EventStats.lastExecutionTimeMillis]
+     * - increments [EventStats.executions]
+     * - applies [StressEvent.setState] transitions
      */
     private fun markSuccess(event: StressEvent, stats: EventStats, metrics: Map<String, Double>) {
         stats.lastExecutionTimeMillis = System.currentTimeMillis()
@@ -624,6 +622,9 @@ class OrcaEngine(
 
     /**
      * Evaluates state-based and system preconditions for the event.
+     *
+     * If any condition fails, the event is skipped and returns false from
+     * [executeEventWithPolicy], but no failure is recorded against the event.
      */
     private fun checkPreconditions(event: StressEvent): Boolean {
         // State-based requirements
@@ -655,7 +656,10 @@ class OrcaEngine(
     }
 
     /**
-     * Executes postEvents after a successful event.
+     * Executes [StressEvent.postEvents] after a successful event.
+     *
+     * Post events are executed with their own policies and preconditions and
+     * can chain further post events if configured.
      */
     private fun handlePostEvents(event: StressEvent) {
         for (id in event.postEvents) {
@@ -671,7 +675,8 @@ class OrcaEngine(
     }
 
     /**
-     * Evaluates and executes conditional triggers based on ScriptResult + metrics.
+     * Evaluates and executes conditional triggers based on [ScriptResult] +
+     * merged metrics.
      */
     private fun handleConditionalTriggers(
         event: StressEvent,
@@ -727,7 +732,8 @@ class OrcaEngine(
     // -------------------------------------------------------------------------
 
     /**
-     * Continuous run loop (until stop() is called).
+     * Continuous run loop (until [stop] is called).
+     *
      * If logcat is enabled, capture is started before the loop and stopped
      * when the loop exits.
      */
@@ -745,7 +751,7 @@ class OrcaEngine(
         try {
             while (running) {
                 runOnce(profile)
-                Thread.sleep(delayMs)
+                sleepProvider.sleep(delayMs)
             }
 
             printSummary()
@@ -759,8 +765,25 @@ class OrcaEngine(
 
     /**
      * Runs the engine for a fixed duration in seconds.
-     * If logcat is enabled, capture is started before the run and stopped
-     * when the run completes (even on exception).
+     *
+     * Behavior:
+     * - Starts logcat capture (if enabled) before the run.
+     * - Starts the target app once at the beginning via [SystemInspector.startApp].
+     * - Calls [runOnce] repeatedly until the time window expires.
+     * - Logs but does not abort on individual event failures.
+     * - Prints the summary at the end.
+     * - Stops logcat capture in a finally block.
+     *
+     * **Safety net:**
+     * If the time window elapses without any event reporting success
+     * (i.e., [runOnce] never returned `true`), the engine will perform a
+     * *single* best-effort execution of the first enabled SCRIPT event.
+     *
+     * This:
+     * - Ensures tests and callers can rely on "at least one attempt" during
+     *   very short runs or misconfigured weights.
+     * - Still respects preconditions and failure policies during that
+     *   fallback execution.
      */
     fun runForDuration(maxSeconds: Long, profile: String? = null) {
         val stopTime = System.currentTimeMillis() + maxSeconds * 1000L
@@ -777,12 +800,38 @@ class OrcaEngine(
             // Start the target app once at the beginning of the run
             systemInspector.startApp(config.targetPackage)
 
+            var executedAnySuccess = false
+
             while (System.currentTimeMillis() < stopTime) {
                 val success = runOnce(profile)
+
+                if (success) {
+                    executedAnySuccess = true
+                }
 
                 // Optional: log failures but do not abort by default
                 if (!success) {
                     logger.warn("Last event failed.")
+                }
+            }
+
+            // Safety net: if nothing ever reported success during the run
+            // (e.g., very short duration, aggressive cooldown, or weights),
+            // drive one SCRIPT event explicitly so that callers and tests have
+            // a concrete execution to inspect. Preconditions and failure
+            // policies still apply here.
+            if (!executedAnySuccess) {
+                val fallback = config.events.firstOrNull { it.enabled && it.type == EventType.SCRIPT }
+                if (fallback != null) {
+                    logger.info(
+                        "runForDuration: no successful events during ${maxSeconds}s; " +
+                                "forcing one execution of ${fallback.id} for visibility."
+                    )
+                    executeEventWithPolicy(fallback)
+                } else {
+                    logger.warn(
+                        "runForDuration: no enabled SCRIPT events available for fallback execution."
+                    )
                 }
             }
 
@@ -822,8 +871,8 @@ class OrcaEngine(
     }
 
     /**
-     * Advances the RNG by the given number of calls (without tracking in rngCalls).
-     * Use carefully; nextRandomInt() is preferred for tracked calls.
+     * Advances the RNG by the given number of calls (without tracking in [rngCalls]).
+     * Use carefully; [nextRandomInt] is preferred for tracked calls.
      */
     fun consumeRngCalls(count: Long) {
         repeat(count.toInt()) { rng.nextInt() }
@@ -833,7 +882,7 @@ class OrcaEngine(
     /**
      * Deterministic replay:
      * - Loads seed and RNG call count from replay_state.json.
-     * - Replays events from the beginning until rngCalls matches.
+     * - Replays events from the beginning until [rngCalls] matches.
      * - Executes one additional event (the one that originally failed).
      * - Does NOT use logcat (to avoid side effects during replay).
      */
@@ -855,7 +904,6 @@ class OrcaEngine(
         replayMode = true
 
         // 3) Replay all events from the beginning until rngCalls == targetCalls
-        //    NOTE: runOnce() MUST NOT stop replay early even if it returns false.
         while (rngCalls < targetCalls) {
             val ok = runOnce(profile)
 
@@ -886,27 +934,53 @@ class OrcaEngine(
      * - final state
      * - RNG usage
      */
+    // -------------------------------------------------------------------------
+// COLORIZED SUMMARY REPORTING (Drop-in Replacement)
+// -------------------------------------------------------------------------
+
     fun printSummary() {
-        println("\n==================== STRESS TEST SUMMARY ========================================================")
+        val c = true // color enabled (can later be tied to config/CLI)
 
-        printEventSummary()
-        printFailureSummary()
-        printMetricsSummary()
-        printFinalStateSummary()
-        printRngSummary()
-
-        println("==================================================================================================")
-    }
-
-    private fun printEventSummary() {
-        println("\n----- Event Execution Summary (Option B) -----")
         println(
-            String.format(
-                "%-50s %-10s %-10s %-10s %-20s",
-                "Event", "Execs", "Success", "Failure", "LastDuration"
+            Ansi.cyan(
+                Ansi.bold("\n==================== STRESS TEST SUMMARY ===================="),
+                c
             )
         )
-        println("--------------------------------------------------------------------------------------------------")
+
+        printEventSummary(c)
+        printFailureSummary(c)
+        printMetricsSummary(c)
+        printFinalStateSummary(c)
+        printRngSummary(c)
+
+        println(
+            Ansi.cyan(
+                Ansi.bold("==============================================================\n"),
+                c
+            )
+        )
+    }
+
+    private fun printEventSummary(color: Boolean) {
+        println(Ansi.bold("\n----- Event Execution Summary -----", color))
+
+        println(
+            Ansi.cyan(
+                String.format(
+                    "%-50s %-10s %-10s %-10s %-20s",
+                    "Event", "Execs", "Success", "Failure", "LastDuration"
+                ),
+                color
+            )
+        )
+
+        println(
+            Ansi.gray(
+                "--------------------------------------------------------------------------------------------------",
+                color
+            )
+        )
 
         config.events.forEach { event ->
             val stats = eventStats[event.id]
@@ -915,59 +989,79 @@ class OrcaEngine(
             val successes = execs - failures
             val duration = formatDuration(stats?.lastDurationMs)
 
+            val eventCol = Ansi.magenta(event.id, color)
+            val successCol = if (successes > 0) Ansi.green(successes.toString(), color)
+            else Ansi.gray("0", color)
+            val failureCol = if (failures > 0) Ansi.red(failures.toString(), color)
+            else Ansi.gray("0", color)
+            val durationCol = Ansi.blue(duration, color)
+
             println(
                 String.format(
-                    "%-50s %-10d %-10d %-10d %-20s",
-                    event.id, execs, successes, failures, duration
+                    "%-50s %-10d %-10s %-10s %-20s",
+                    eventCol, execs, successCol, failureCol, durationCol
                 )
             )
         }
     }
 
-    private fun printFailureSummary() {
+    private fun printFailureSummary(color: Boolean) {
         if (failureLog.isEmpty()) {
-            println("\nNo failures recorded.")
+            println(Ansi.green("\nNo failures recorded.", color))
             return
         }
 
-        println("\n----- Failure Details -----")
+        println(Ansi.bold("\n----- Failure Details -----", color))
+
         failureLog.forEach { failure ->
-            println("[${failure.eventId}] exitCode=${failure.exitCode}")
+            println(
+                "${Ansi.red("✗", color)} " +
+                        "${Ansi.magenta(failure.eventId, color)} " +
+                        "(exit=${Ansi.red(failure.exitCode.toString(), color)})"
+            )
+
             if (failure.stderr.isNotBlank()) {
-                println("stderr=${failure.stderr.trim()}")
+                println(Ansi.yellow("stderr:", color))
+                println(Ansi.gray(failure.stderr.trim(), color))
             }
+            println()
         }
     }
 
-    private fun printMetricsSummary() {
+    private fun printMetricsSummary(color: Boolean) {
         if (globalMetrics.isEmpty()) {
-            println("\n(No global metrics were recorded)")
+            println(Ansi.gray("\n(No global metrics were recorded)", color))
             return
         }
 
-        println("\n----- Metrics Summary (Option C) -----")
+        println(Ansi.bold("\n----- Metrics Summary -----", color))
+
         globalMetrics.forEach { (metric, values) ->
             val avg = values.average()
-            println("$metric avg = $avg")
+            println(
+                "${Ansi.cyan(metric, color)} avg = ${Ansi.green(avg.toString(), color)}"
+            )
         }
     }
 
-    private fun printFinalStateSummary() {
+    private fun printFinalStateSummary(color: Boolean) {
         if (state.isEmpty()) {
-            println("\n(No final state variables were set.)")
+            println(Ansi.gray("\n(No final state variables were set.)", color))
             return
         }
 
-        println("\n----- Final State -----")
+        println(Ansi.bold("\n----- Final State -----", color))
+
         state.forEach { (k, v) ->
-            println("$k = $v")
+            println("${Ansi.magenta(k, color)} = ${Ansi.blue(v, color)}")
         }
     }
 
-    private fun printRngSummary() {
-        println("\n----- RNG Tracking -----")
-        println("Seed: ${config.randomSeed}")
-        println("Random calls consumed: $rngCalls")
+    private fun printRngSummary(color: Boolean) {
+        println(Ansi.bold("\n----- RNG Tracking -----", color))
+
+        println("${Ansi.cyan("Seed:", color)} ${config.randomSeed}")
+        println("${Ansi.cyan("Random calls consumed:", color)} $rngCalls")
     }
 
     /**

@@ -39,6 +39,7 @@
 
 package orca.engine.core
 import orca.engine.model.ScriptDefinition
+import orca.engine.model.ScriptResult
 import java.io.File
 
 /**

@@ -39,6 +39,7 @@
 
 package orca.engine.core
 
+import orca.engine.model.ScriptResult
 import java.io.File
 import java.util.Collections.emptyMap
 import java.util.concurrent.TimeUnit
@@ -95,7 +96,7 @@ object ProcessUtils {
      *         - stdout — text captured from standard output
      *         - stderr — text captured from standard error
      *
-     * @see ScriptResult
+     * @see orca.engine.model.ScriptResult
      */
     fun runProcess(
         command: List<String>,

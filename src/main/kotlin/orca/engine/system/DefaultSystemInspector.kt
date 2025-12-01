@@ -39,7 +39,7 @@
 
 package orca.engine.system
 
-import orca.engine.core.SystemInspector
+import orca.engine.model.SystemInspector
 import orca.engine.model.MetricsConfig
 
 /**

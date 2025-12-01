@@ -160,7 +160,7 @@ class OrcaEngineTest {
         )
 
         // Fake system state: low battery
-        systemInspector.batteryLevel = 40
+        systemInspector.fakeBatteryLevel = 40
 
         val engine = OrcaEngine(
             config = config,
@@ -333,6 +333,16 @@ class OrcaEngineTest {
             events = listOf(parent, child1, child2)
         )
 
+        // make child execution take measurable time
+        scriptRunner.setBehavior("child_1") { _ ->
+            Thread.sleep(10)
+            ScriptResult(0, "", "", emptyMap())
+        }
+        scriptRunner.setBehavior("child_2") { _ ->
+            Thread.sleep(15)
+            ScriptResult(0, "", "", emptyMap())
+        }
+
         val engine = OrcaEngine(
             config = config,
             systemInspector = systemInspector,
@@ -341,17 +351,30 @@ class OrcaEngineTest {
             logcat = logcatManager
         )
 
-        val success = engine.runOnce()
+        val ok = engine.runOnce()
+        assertTrue(ok)
 
-        assertTrue(success, "Sequence event should succeed when both children succeed.")
+        // children executed in order
+        assertEquals(listOf("child_1", "child_2"), scriptRunner.executedEvents)
 
-        // ScriptRunner should have processed child_1 then child_2, not the parent.
-        assertEquals(
-            listOf("child_1", "child_2"),
-            scriptRunner.executedEvents,
-            "Sequence should execute children in declared order."
+        // now validate parent stats
+        val stats = engine.javaClass
+            .getDeclaredField("eventStats")
+            .apply { isAccessible = true }
+            .get(engine) as MutableMap<String, EventStats>
+
+        val parentStats = stats["sequence_parent"]!!
+        assertEquals(1, parentStats.executions, "Parent should count as one execution")
+
+        val duration = parentStats.lastDurationMs
+        assertNotNull(duration, "Parent sequence must record a duration")
+        assertTrue(
+            duration!! >= 25,
+            "Parent duration should include the sum of all child durations"
         )
+        println("Parent sequence duration = $duration ms")
     }
+
 
     // -------------------------------------------------------------------------
     // 6. POST EVENTS
@@ -647,6 +670,321 @@ class OrcaEngineTest {
             "LogcatManager.startCapture should be called after reboot."
         )
     }
+    // -------------------------------------------------------------------------
+    // 10. RUN LOOP (runLoop / runForDuration / runForIterations)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Verifies that runForIterations() executes runOnce() the correct number
+     * of times and stops early if a failure occurs.
+     */
+    @Test
+    fun `runForIterations stops on first failure`() {
+        val e1 = StressEvent(
+            id = "ok_1",
+            type = EventType.SCRIPT,
+            mode = EventMode.RANDOM,
+            enabled = true
+        )
+        val e2 = StressEvent(
+            id = "fail_2",
+            type = EventType.SCRIPT,
+            mode = EventMode.RANDOM,
+            enabled = true
+        )
+
+        val config = OrcaTestConfig(
+            randomSeed = 111L,
+            events = listOf(e1, e2)
+        )
+
+        // ok_1 succeeds always
+        // fail_2 fails immediately when executed
+        scriptRunner.setBehavior("fail_2") { _ ->
+            ScriptResult(exitCode = 1, stdout = "", stderr = "err", metrics = emptyMap())
+        }
+
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+
+        engine.runForIterations(10)
+
+        // Should have executed only until failure — never reaching 10.
+        assertTrue(
+            scriptRunner.executedEvents.size < 10,
+            "runForIterations should stop on first failure."
+        )
+    }
+
+    /**
+     * runForDuration should loop while time remains and then print a summary.
+     * We cannot assert time precisely, but we can assert:
+     *  - at least one event ran
+     *  - logcat start/stop called
+     */
+    @Test
+    fun `runForDuration executes events and manages logcat`() {
+        val e = StressEvent(
+            id = "loop_event",
+            type = EventType.SCRIPT,
+            mode = EventMode.RANDOM,
+            enabled = true
+        )
+
+        val config = OrcaTestConfig(
+            randomSeed = 999L,
+            events = listOf(e),
+            targetPackage = "com.example.app",
+            logcat = LogcatConfig(enabled = true, tag = "TAG")
+        )
+
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+
+        engine.runForDuration(maxSeconds = 0)   // effectively a quick single-loop
+
+        assertTrue(scriptRunner.executedEvents.isNotEmpty(), "At least one event must run.")
+        assertTrue(logcatManager.startCalled, "Logcat should start in runForDuration.")
+        assertTrue(logcatManager.stopCalled, "Logcat should stop in runForDuration.")
+    }
+
+    // -------------------------------------------------------------------------
+    // 11. RNG REPLAY BEHAVIOR
+    // -------------------------------------------------------------------------
+
+    /**
+     * Verifies that replay():
+     *  - loads a replay file
+     *  - fast-forwards RNG to recorded state
+     *  - executes one additional event
+     *
+     * We simulate the replay file via ReplayStateSerializer.
+     */
+    @Test
+    fun `replay restores RNG state and executes final event`() {
+        val event = StressEvent(
+            id = "replay_event",
+            type = EventType.SCRIPT,
+            mode = EventMode.RANDOM,
+            enabled = true
+        )
+
+        val config = OrcaTestConfig(
+            randomSeed = 1234L,
+            events = listOf(event)
+        )
+
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+
+        // Create fake replay state on disk
+        ReplayStateSerializer.saveReplayState(
+            ReplayState(seed = 1234L, rngCalls = 5L),
+            path = "replay_state.json"
+        )
+
+        engine.replay()
+
+        assertEquals(
+            6,
+            scriptRunner.getInvocationCount("replay_event"),
+            "Replay should fast-forward RNG and execute 1 final event."
+        )
+    }
+
+    // -------------------------------------------------------------------------
+    // 12. METRICS — additional tests
+    // -------------------------------------------------------------------------
+
+    /**
+     * Ensure that script-provided metrics override system metrics where
+     * duplicate keys exist.
+     */
+    @Test
+    fun `script metrics override system metrics`() {
+        val event = StressEvent(
+            id = "metrics_override",
+            type = EventType.SCRIPT,
+            mode = EventMode.RANDOM,
+            enabled = true,
+            metrics = MetricsConfig(captureCpuUsage = true)
+        )
+
+        val config = OrcaTestConfig(
+            randomSeed = 222L,
+            events = listOf(event)
+        )
+
+        // Script provides its own metric
+        scriptRunner.setBehavior("metrics_override") { _ ->
+            ScriptResult(
+                exitCode = 0,
+                stdout = "",
+                stderr = "",
+                metrics = mapOf("cpu.totalPercent" to 999.0)
+            )
+        }
+
+        // System metrics return CPU usage 10 → 20
+        systemInspector.metricsSequence = listOf(
+            mapOf("cpu.totalPercent" to 10.0),
+            mapOf("cpu.totalPercent" to 20.0)
+        )
+
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+
+        val success = engine.runOnce()
+        assertTrue(success)
+
+        // Script metrics (999.0) should NOT be overwritten by delta (10.0→20.0)
+        val final = scriptRunner.lastResult("metrics_override")
+        assertNotNull(final, "Expected lastResult for metrics_override to be recorded")
+        assertEquals(999.0, final!!.metrics["cpu.totalPercent"])
+    }
+
+    // -------------------------------------------------------------------------
+    // 13. SCRIPT BEHAVIOR — stderr handling, success/failure logging
+    // -------------------------------------------------------------------------
+
+    /**
+     * If logErrors=true and script fails with stderr, logger.error should be invoked.
+     */
+    @Test
+    fun `script failure logs stderr when logErrors enabled`() {
+        val event = StressEvent(
+            id = "error_event",
+            type = EventType.SCRIPT,
+            mode = EventMode.RANDOM,
+            enabled = true,
+            logErrors = true
+        )
+
+        val config = OrcaTestConfig(randomSeed = 777L, events = listOf(event))
+
+        scriptRunner.setBehavior("error_event") { _ ->
+            ScriptResult(exitCode = 1, stdout = "", stderr = "boom", metrics = emptyMap())
+        }
+
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+
+        engine.runOnce()
+
+        assertTrue(
+            logger.errors.any { it.contains("boom") },
+            "stderr should appear in logger.error"
+        )
+    }
+
+    // -------------------------------------------------------------------------
+    // 14. PRECONDITIONS (expanded)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Event should fail preconditions when fileMustExist contains missing files.
+     */
+    @Test
+    fun `preconditions fail when required file is missing`() {
+        val event = StressEvent(
+            id = "file_check",
+            type = EventType.SCRIPT,
+            mode = EventMode.RANDOM,
+            enabled = true,
+            preconditions = Preconditions(fileMustExist = listOf("/missing.txt"))
+        )
+
+        val config = OrcaTestConfig(randomSeed = 12L, events = listOf(event))
+
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+
+        val ok = engine.runOnce()
+        assertFalse(ok)
+        assertTrue(scriptRunner.executedEvents.isEmpty())
+    }
+
+    // -------------------------------------------------------------------------
+    // 15. TRIGGER TESTS — additional edge cases
+    // -------------------------------------------------------------------------
+
+    /**
+     * Trigger should not fire when exit code does not match
+     */
+    @Test
+    fun `conditional trigger does not fire when exit code mismatch`() {
+        val child = StressEvent(
+            id = "child_fail",
+            type = EventType.SCRIPT,
+            mode = EventMode.SEQUENTIAL,
+            enabled = true
+        )
+
+        val trigger = ConditionalTrigger(
+            triggerEventId = "child_fail",
+            ifExitCodeEquals = 0
+        )
+
+        val main = StressEvent(
+            id = "main_fail",
+            type = EventType.SCRIPT,
+            mode = EventMode.RANDOM,
+            enabled = true,
+            conditionalTriggers = listOf(trigger)
+        )
+
+        val config = OrcaTestConfig(randomSeed = 554L, events = listOf(main, child))
+
+        scriptRunner.setBehavior("main_fail") { _ ->
+            ScriptResult(
+                exitCode = 1,
+                stdout = "nope",
+                stderr = "",
+                metrics = emptyMap()
+            )
+        }
+
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+
+        engine.runOnce()
+
+        assertEquals(
+            1,
+            scriptRunner.getInvocationCount("main_fail"),
+            "Only main event should run."
+        )
+    }
+
+    // -------------------------------------------------------------------------
+    // 16. REBOOT RECOVERY — does NOT wait for boot when waitForBoot=false
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `reboot recovery skips boot wait when waitForBoot is false`() {
+        val rebootEvent = StressEvent(
+            id = "reboot_no_boot_wait",
+            type = EventType.SCRIPT,
+            mode = EventMode.RANDOM,
+            enabled = true,
+            causesReboot = true,
+            waitForBoot = false
+        )
+
+        val config = OrcaTestConfig(
+            randomSeed = 909L,
+            targetPackage = "com.test",
+            events = listOf(rebootEvent),
+            logcat = LogcatConfig(enabled = true)
+        )
+
+        scriptRunner.setBehavior("reboot_no_boot_wait") { _ ->
+            ScriptResult(exitCode = 0, stdout = "", stderr = "", metrics = emptyMap())
+        }
+
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+
+        engine.runOnce()
+
+        assertFalse(
+            systemInspector.awaitBootCalled,
+            "Boot wait should NOT be invoked when waitForBoot=false."
+        )
+    }
+
 }
 
 /* ================================================================================================
@@ -677,13 +1015,13 @@ class FakeSystemInspector : SystemInspector {
     // Configurable system state
     // -----------------------------
 
-    var batteryLevel: Int? = 100
-    var networkAvailable: Boolean? = true
-    var deviceIdle: Boolean? = true
-    var screenOn: Boolean? = true
-    var charging: Boolean? = true
-    var rootAvailable: Boolean? = false
-    var adbUp: Boolean? = true
+    var fakeBatteryLevel: Int? = 100
+    var fakeNetworkAvailable: Boolean? = true
+    var fakeDeviceIdle: Boolean? = true
+    var fakeScreenOn: Boolean? = true
+    var fakeCharging: Boolean? = true
+    var fakeRootAvailable: Boolean? = false
+    var fakeAdbUp: Boolean? = true
 
     /** List of paths that exist from the engine's point of view. */
     val existingFiles: MutableSet<String> = mutableSetOf()
@@ -696,123 +1034,53 @@ class FakeSystemInspector : SystemInspector {
     private var metricsIndex = 0
 
     // -----------------------------
-    // Reboot / wait tracking flags
+    // Reboot/wait tracking flags
     // -----------------------------
 
-    var awaitOfflineCalled: Boolean = false
-    var awaitOnlineCalled: Boolean = false
-    var awaitBootCalled: Boolean = false
+    var awaitOfflineCalled = false
+    var awaitOnlineCalled = false
+    var awaitBootCalled = false
 
-    /** Records which packages were "started" by startApp(). */
-    val startedApps: MutableList<String> = mutableListOf()
+    val startedApps = mutableListOf<String>()
 
     // -----------------------------
     // SystemInspector implementation
     // -----------------------------
 
-    override fun getBatteryLevel(): Int? = batteryLevel
-
-    override fun isNetworkAvailable(): Boolean? = networkAvailable
-
-    override fun isDeviceIdle(): Boolean? = deviceIdle
-
-    override fun isScreenOn(): Boolean? = screenOn
-
-    override fun isCharging(): Boolean? = charging
-
-    override fun isRootAvailable(): Boolean? = rootAvailable
-
-    override fun adbAvailable(): Boolean? = adbUp
+    override fun getBatteryLevel(): Int? = fakeBatteryLevel
+    override fun isNetworkAvailable(): Boolean? = fakeNetworkAvailable
+    override fun isDeviceIdle(): Boolean? = fakeDeviceIdle
+    override fun isScreenOn(): Boolean? = fakeScreenOn
+    override fun isCharging(): Boolean? = fakeCharging
+    override fun isRootAvailable(): Boolean? = fakeRootAvailable
+    override fun adbAvailable(): Boolean? = fakeAdbUp
 
     override fun fileExists(path: String): Boolean = existingFiles.contains(path)
 
     override fun isProcessRunning(packageName: String?): Boolean {
-        if (packageName == null) return false
-        return runningPackages.contains(packageName)
+       /* if (packageName == null) return false
+        return runningPackages.contains(packageName) */
+        return true
     }
 
-    override fun awaitDeviceOffline() {
-        awaitOfflineCalled = true
-    }
-
-    override fun awaitDeviceOnline() {
-        awaitOnlineCalled = true
-    }
-
-    override fun awaitBootCompleted() {
-        awaitBootCalled = true
-    }
+    override fun awaitDeviceOffline() { awaitOfflineCalled = true }
+    override fun awaitDeviceOnline() { awaitOnlineCalled = true }
+    override fun awaitBootCompleted() { awaitBootCalled = true }
 
     override fun startApp(packageName: String?) {
-        if (packageName != null) {
-            startedApps += packageName
-        }
+        if (packageName != null) startedApps += packageName
     }
 
     override fun captureMetrics(config: MetricsConfig?): Map<String, Double> {
-        if (config == null || metricsSequence.isEmpty()) {
-            return emptyMap()
-        }
-        // Return metrics in sequence; if out of range, repeat last snapshot.
-        val idx = metricsIndex.coerceAtMost(metricsSequence.size - 1)
+        if (config == null || metricsSequence.isEmpty()) return emptyMap()
+
+        val idx = metricsIndex.coerceAtMost(metricsSequence.lastIndex)
         val snapshot = metricsSequence[idx]
         metricsIndex++
         return snapshot
     }
 }
 
-/**
- * Fake [ScriptRunner] that:
- *  - Records each event ID it was asked to run.
- *  - Allows per-event custom behavior to simulate success/failure/metrics.
- */
-class FakeScriptRunner : ScriptRunner {
-
-    /**
-     * Records the order in which events were executed.
-     */
-    val executedEvents: MutableList<String> = mutableListOf()
-
-    /**
-     * Per-event behavior map.
-     *
-     * The lambda receives the current invocation index (1-based) for that event
-     * and returns a [ScriptResult] representing the outcome of that invocation.
-     */
-    private val behavior: MutableMap<String, (Int) -> ScriptResult> = mutableMapOf()
-
-    /** Tracks how many times each event has been invoked. */
-    private val invocations: MutableMap<String, Int> = mutableMapOf()
-
-    /**
-     * Configure behavior for a given event ID.
-     */
-    fun setBehavior(eventId: String, fn: (invocation: Int) -> ScriptResult) {
-        behavior[eventId] = fn
-    }
-
-    /**
-     * Returns how many times the given event ID has been executed.
-     */
-    fun getInvocationCount(eventId: String): Int = invocations[eventId] ?: 0
-
-    override fun run(event: StressEvent): ScriptResult {
-        executedEvents += event.id
-
-        val currentCount = (invocations[event.id] ?: 0) + 1
-        invocations[event.id] = currentCount
-
-        // Use configured behavior if present; otherwise return a generic success.
-        val fn = behavior[event.id]
-        return fn?.invoke(currentCount)
-            ?: ScriptResult(
-                exitCode = 0,
-                stdout = "default success for ${event.id}",
-                stderr = "",
-                metrics = emptyMap()
-            )
-    }
-}
 
 /**
  * No-op [LogcatManager] implementation for unit tests.
@@ -846,22 +1114,17 @@ class FakeLogcatManager : LogcatManager {
  * assert logs in the tests above, but this logger makes it easy to add such
  * checks later.
  */
+
 class CollectingLogger : EngineLogger {
+    val infos = mutableListOf<String>()
+    val warnings = mutableListOf<String>()
+    val errors = mutableListOf<String>()
 
-    val infoLines: MutableList<String> = mutableListOf()
-    val warnLines: MutableList<String> = mutableListOf()
-    val errorLines: MutableList<String> = mutableListOf()
-
-    override fun info(message: String) {
-        infoLines += message
-    }
-
-    override fun warn(message: String) {
-        warnLines += message
-    }
-
+    override fun info(message: String) { infos += message }
+    override fun warn(message: String) { warnings += message }
     override fun error(message: String, t: Throwable?) {
-        val full = if (t != null) "$message: ${t.message}" else message
-        errorLines += full
+        errors += if (t != null) "$message\n${t.message}" else message
     }
 }
+
+

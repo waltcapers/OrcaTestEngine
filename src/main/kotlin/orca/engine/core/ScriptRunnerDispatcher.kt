@@ -41,10 +41,12 @@ package orca.engine.core
 
 import RubyScriptHandler
 import orca.engine.model.ScriptLanguage
+import orca.engine.model.ScriptResult
+import orca.engine.model.ScriptRunner
 import orca.engine.model.StressEvent
 
 /**
- * Default implementation of [ScriptRunner].
+ * Default implementation of [orca.engine.model.ScriptRunner].
  *
  * This class acts as a *dispatcher*:
  *
@@ -117,7 +119,7 @@ class ScriptRunnerDispatcher(
 ) : ScriptRunner {
 
     /**
-     * Execute a single SCRIPT-type event and return a [ScriptResult].
+     * Execute a single SCRIPT-type event and return a [orca.engine.model.ScriptResult].
      *
      * OrcaEngine guarantees that:
      *  - This is only called for events where `type == EventType.SCRIPT`
