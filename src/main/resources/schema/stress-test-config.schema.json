@@ -309,7 +309,6 @@
           "description": "Optional file path for event-specific logging."
         }
       }
-      /* NOTE: No additionalProperties:false here → event objects stay extensible */
     },
 
     "ScriptDefinition": {

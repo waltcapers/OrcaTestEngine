@@ -67,9 +67,10 @@ object ValidateCommand {
         val violations = try {
             JsonSchemaValidator.validateConfig(file)
         } catch (ex: Exception) {
-            println("❌ Failed to validate configuration: ${ex.message}")
-            ex.printStackTrace()
-            return
+            // Catch malformed JSON, schema errors, IO, anything
+            println("❌ Failed to validate configuration:")
+            println("   ${ex.message ?: ex.javaClass.simpleName}")
+            return   // <-- critical: return control to CLI
         }
 
         if (violations.isEmpty()) {
@@ -82,3 +83,4 @@ object ValidateCommand {
         }
     }
 }
+

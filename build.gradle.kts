@@ -24,6 +24,7 @@ dependencies {
     implementation("com.networknt:json-schema-validator:1.0.83")
     testImplementation("io.mockk:mockk:1.13.7")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
+    implementation("org.slf4j:slf4j-nop:2.0.7")
     testImplementation(kotlin("test"))
 }
 

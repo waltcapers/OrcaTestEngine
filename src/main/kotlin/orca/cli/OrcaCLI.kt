@@ -413,7 +413,7 @@ object OrcaCLI {
             val reader = System.`in`.bufferedReader()
 
             while (true) {
-                print(Ansi.green("${Ansi.promptSymbol(sessionOpts.colorEnabled)} ", sessionOpts.colorEnabled))
+                print(Ansi.green("orca${Ansi.promptSymbol(sessionOpts.colorEnabled)} ", sessionOpts.colorEnabled))
                 val line = reader.readLine() ?: break
                 val trimmed = line.trim()
                 if (trimmed.isEmpty()) continue
@@ -428,7 +428,11 @@ object OrcaCLI {
                 val tokens = tokenize(trimmed)
                 try {
                     val parsed = parseArgs(tokens.toTypedArray())
-                    dispatch(parsed.command, parsed.commandArgs, parsed.options)
+                    try {
+                        dispatch(parsed.command, parsed.commandArgs, parsed.options)
+                    } catch (e: Exception) {
+                        println(Ansi.red("Error: ${e.message}", sessionOpts.colorEnabled))
+                    }
                 } catch (e: IllegalArgumentException) {
                     printError(e.message ?: "Invalid command.", sessionOpts)
                 }
