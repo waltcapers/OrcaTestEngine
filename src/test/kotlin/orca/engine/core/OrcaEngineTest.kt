@@ -1119,9 +1119,11 @@ class CollectingLogger : EngineLogger {
     val infos = mutableListOf<String>()
     val warnings = mutableListOf<String>()
     val errors = mutableListOf<String>()
+    val debug = mutableListOf<String>()
 
     override fun info(message: String) { infos += message }
     override fun warn(message: String) { warnings += message }
+    override fun debug(message:String) { debug += message}
     override fun error(message: String, t: Throwable?) {
         errors += if (t != null) "$message\n${t.message}" else message
     }

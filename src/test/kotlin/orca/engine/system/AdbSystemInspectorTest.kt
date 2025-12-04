@@ -15,6 +15,7 @@
 package orca.engine.system
 
 import orca.engine.core.EngineLogger
+import orca.engine.logging.ConsoleEngineLogger
 import orca.engine.model.MetricsConfig
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.Test
  */
 class AdbSystemInspectorTest {
 
+    val logger = ConsoleEngineLogger()
     /**
      * Helper to build an inspector with canned shell + exec behavior.
      *
@@ -91,7 +93,7 @@ class AdbSystemInspectorTest {
             )
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger= logger)
 
         assertEquals(87, ins.getBatteryLevel())
     }
@@ -105,7 +107,7 @@ class AdbSystemInspectorTest {
             )
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
 
         assertEquals(65, ins.getBatteryLevel())
     }
@@ -127,7 +129,7 @@ class AdbSystemInspectorTest {
             )
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger )
         assertTrue(ins.isNetworkAvailable()!!)
     }
 
@@ -137,7 +139,7 @@ class AdbSystemInspectorTest {
             "dumpsys connectivity" to AdbResult(1, "", "")
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
         assertNull(ins.isNetworkAvailable())
     }
 
@@ -155,7 +157,7 @@ class AdbSystemInspectorTest {
             )
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
         assertTrue(ins.isScreenOn()!!)
     }
 
@@ -169,7 +171,7 @@ class AdbSystemInspectorTest {
             )
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
         assertFalse(ins.isScreenOn()!!)
     }
 
@@ -190,7 +192,7 @@ class AdbSystemInspectorTest {
             )
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
         assertTrue(ins.isCharging()!!)
     }
 
@@ -204,7 +206,7 @@ class AdbSystemInspectorTest {
             "pidof com.example.test" to AdbResult(0, "1234", "")
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
         assertTrue(ins.isProcessRunning("com.example.test"))
     }
 
@@ -214,7 +216,7 @@ class AdbSystemInspectorTest {
             "pidof com.example.test" to AdbResult(0, "", "")
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
         assertFalse(ins.isProcessRunning("com.example.test"))
     }
 
@@ -228,7 +230,7 @@ class AdbSystemInspectorTest {
             "ls \"test.txt\"" to AdbResult(0, "", "")
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
 
         assertTrue(ins.fileExists("test.txt"))
     }
@@ -239,7 +241,7 @@ class AdbSystemInspectorTest {
             "ls \"missing.txt\"" to AdbResult(1, "", "")
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
         assertFalse(ins.fileExists("missing.txt"))
     }
 
@@ -257,7 +259,7 @@ class AdbSystemInspectorTest {
             )
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
 
         val result = ins.captureMetrics(
             MetricsConfig(captureCpuUsage = true)
@@ -279,7 +281,7 @@ class AdbSystemInspectorTest {
             )
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
 
         val result = ins.captureMetrics(
             MetricsConfig(captureMemoryUsage = true)
@@ -299,7 +301,7 @@ class AdbSystemInspectorTest {
             )
         )
 
-        val ins = inspector(shellMap)
+        val ins = inspector(shellMap, logger = logger)
 
         val result = ins.captureMetrics(
             MetricsConfig(captureBatteryLevel = true)
