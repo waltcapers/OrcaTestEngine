@@ -121,7 +121,7 @@ class AdbSystemInspectorWaitTests {
             cannedShell = { AdbResult(0, "", "") }
         )
 
-        val ins = AdbSystemInspector(fake, "com.test", debug = false)
+        val ins = AdbSystemInspector(fake, "com.test", debug = false, logger = ConsoleEngineLogger())
 
         ins.awaitDeviceOnline()
 
