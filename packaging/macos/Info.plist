@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>            <string>Orca</string>
+    <key>CFBundleDisplayName</key>     <string>Orca</string>
+    <key>CFBundleVersion</key>         <string>1.0</string>
+    <key>CFBundleIdentifier</key>      <string>com.orca.testengine</string>
+    <key>CFBundleExecutable</key>      <string>orca</string>
+    <key>LSBackgroundOnly</key>        <false/>
+</dict>
+</plist>

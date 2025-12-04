@@ -6,6 +6,8 @@
 
 package orca.engine.system
 
+import orca.engine.core.EngineLogger
+import orca.engine.logging.ConsoleEngineLogger
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
@@ -25,7 +27,8 @@ class AdbSystemInspectorWaitTests {
      */
     private fun inspectorWithSequences(
         execSeq: Map<List<String>, List<AdbResult>> = emptyMap(),
-        shellSeq: Map<String, List<AdbResult>> = emptyMap()
+        shellSeq: Map<String, List<AdbResult>> = emptyMap(),
+        logger: EngineLogger
     ): AdbSystemInspector {
 
         val execCounters = execSeq.mapValues { 0 }.toMutableMap()
@@ -53,7 +56,8 @@ class AdbSystemInspectorWaitTests {
         return AdbSystemInspector(
             adb = fake,
             defaultPackageName = "com.test",
-            debug = false
+            debug = false,
+            logger = logger
         )
     }
 
@@ -70,7 +74,8 @@ class AdbSystemInspectorWaitTests {
                     AdbResult(0, "device", ""),   // still online
                     AdbResult(1, "", "")          // exit != 0 → offline!
                 )
-            )
+            ),
+            logger = ConsoleEngineLogger()
         )
 
         // If the logic is correct, this will return and NOT infinite-loop.
@@ -88,7 +93,8 @@ class AdbSystemInspectorWaitTests {
                     AdbResult(0, "device", ""),
                     AdbResult(0, "unknown", "")   // unknown → offline
                 )
-            )
+            ),
+            logger = ConsoleEngineLogger()
         )
 
         ins.awaitDeviceOffline()
@@ -136,7 +142,8 @@ class AdbSystemInspectorWaitTests {
                     AdbResult(0, "0", ""),   // still booting
                     AdbResult(0, "1", "")    // boot complete
                 )
-            )
+            ),
+            logger = ConsoleEngineLogger()
         )
 
         // Should exit normally with no infinite loop

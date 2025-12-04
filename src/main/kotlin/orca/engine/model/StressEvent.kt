@@ -151,6 +151,9 @@ data class StressEvent(
     /** If false, the event is disabled and will never run. */
     val enabled: Boolean = true,
 
+    /** event level breakpoint */
+    val debugBreak: Boolean? = null,
+
     // -------------------------------------------------------------------------
     // Script execution info
     // -------------------------------------------------------------------------
@@ -210,6 +213,11 @@ data class StressEvent(
     /** Optional retry policy overriding the global defaultRetry in OrcaTestConfig. */
     val retryPolicy: RetryPolicy? = null,
 
+    /**
+     * If true an event failure terminates the test
+     */
+    val stopOnFailure: Boolean = false,
+
     /** List of event IDs to automatically trigger after successful execution. */
     val postEvents: List<String> = emptyList(),
 
@@ -253,4 +261,5 @@ data class StressEvent(
      * EngineLogger still receives stdout/stderr unless configured otherwise.
      */
     val logFile: String? = null
+
 )

@@ -90,7 +90,7 @@ object ReplayCommand {
             return
         }
 
-        val inspector = DefaultSystemInspector(debug = false)
+        val inspector = DefaultSystemInspector(debug = false, logger)
         val scriptRunner = orca.engine.core.ScriptRunnerDispatcher()
 
         val engine = OrcaEngine(

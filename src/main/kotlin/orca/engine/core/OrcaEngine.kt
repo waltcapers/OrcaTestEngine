@@ -91,8 +91,14 @@ class OrcaEngine(
     /** Global metrics aggregated across events. */
     private val globalMetrics = mutableMapOf<String, MutableList<Double>>()
 
+    /** Shared reader for interactive debug breakpoints. */
+    private val debugReader by lazy { System.`in`.bufferedReader() }
+
     @Volatile
     private var running = true
+
+    /** Whether we are currently breaking before each event (config-driven). */
+    private var debugBreakActive: Boolean = config.debugBreakBeforeEvent == true
 
     // -------------------------------------------------------------------------
     // RNG tracking for deterministic replay
@@ -175,8 +181,21 @@ class OrcaEngine(
             logger.warn("No eligible events to run.")
             return false
         }
+
+        // -----------------------------------------------------------------
+        // STEP MODE (Option B): break AFTER selecting, BEFORE executing
+        // -----------------------------------------------------------------
+        val breakForThisEvent =
+            debugBreakActive || (event.debugBreak == true)
+
+        if (breakForThisEvent) {
+            val shouldContinue = promptBeforeEvent(event)
+            if (!shouldContinue) return false
+        }
+
         return executeEventWithPolicy(event)
     }
+
 
     // -------------------------------------------------------------------------
     // Event selection
@@ -259,15 +278,46 @@ class OrcaEngine(
      * @return true if the event succeeded within its retry policy.
      */
     private fun executeEventWithPolicy(event: StressEvent): Boolean {
-        if (!checkPreconditions(event)) {
-            logger.info("Preconditions not met for ${event.id}, skipping.")
+        // -----------------------------------------------------------------
+        // Global + per-event "break before execute"
+        // -----------------------------------------------------------------
+        if (config.debugBreakBeforeEvent == true || event.debugBreak == true) {
+            debugBreakpoint("Before executing event", event)
+            if (!running) return false
+        }
+
+        // -----------------------------------------------------------------
+        // Preconditions
+        // -----------------------------------------------------------------
+        var preconditionReason: String? = null
+        val preconditionsOk = checkPreconditions(event) { reason ->
+            preconditionReason = reason
+        }
+
+        if (!preconditionsOk) {
+            logger.info(
+                "Preconditions not met for ${event.id}, skipping." +
+                        (preconditionReason?.let { " ($it)" } ?: "")
+            )
+
+            if (config.debugBreakWhenPreconditionsFail == true) {
+                debugBreakpoint(
+                    "Preconditions failed for event ${event.id}: ${preconditionReason ?: "no details"}",
+                    event
+                )
+                if (!running) return false
+            }
+
             return false
         }
 
+        // -----------------------------------------------------------------
+        // Retry policy
+        // -----------------------------------------------------------------
         val retry = event.retryPolicy ?: config.defaultRetry ?: RetryPolicy(maxAttempts = 1)
         var attempt = 0
 
-        while (attempt < retry.maxAttempts) {
+        while (attempt < retry.maxAttempts && running) {
             attempt++
             val success = executeSingleAttempt(event)
 
@@ -282,6 +332,16 @@ class OrcaEngine(
                     RetryStrategy.LINEAR -> retry.backoffSeconds
                     RetryStrategy.EXPONENTIAL -> retry.backoffSeconds * (1 shl (attempt - 1))
                 }
+
+                // Optional breakpoint whenever we go into a retry
+                if (config.debugBreakOnRetry == true) {
+                    debugBreakpoint(
+                        "Retrying ${event.id} (attempt $attempt/${retry.maxAttempts})",
+                        event
+                    )
+                    if (!running) return false
+                }
+
                 if (delaySec > 0) {
                     logger.info("Retrying ${event.id} in $delaySec seconds (attempt $attempt/${retry.maxAttempts})")
                     sleepProvider.sleep(delaySec * 1000L)
@@ -292,7 +352,6 @@ class OrcaEngine(
         when (event.onFailure) {
             FailurePolicy.STOP_TEST -> {
                 logger.error("FailurePolicy.STOP_TEST triggered by ${event.id}")
-                // Capture replay state so the failure can be reproduced deterministically.
                 saveReplayState()
             }
             FailurePolicy.SKIP_FUTURE -> {
@@ -300,12 +359,25 @@ class OrcaEngine(
                 eventStats.getOrPut(event.id) { EventStats() }.disabled = true
             }
             FailurePolicy.LOG_ONLY, FailurePolicy.RETRY -> {
-                // Nothing extra; failure already logged.
+                // Nothing extra
             }
+            null -> {
+                // no-op
+            }
+        }
+
+        // ⭐ NEW: stopOnFailure support
+        if (event.stopOnFailure) {
+            logger.error("stopOnFailure=true → stopping engine immediately due to failure of ${event.id}.")
+            saveReplayState()        // capture deterministic state for debugging
+            stop()                   // sets running = false
+            return false             // bubble failure upward
         }
 
         return false
     }
+
+
 
     /**
      * Executes a single attempt of an event (no retries).
@@ -333,8 +405,16 @@ class OrcaEngine(
         // 1. Handle SEQUENCE events (no script execution here)
         // ---------------------------------------------------------------------
         if (event.type == EventType.SEQUENCE) {
-            return executeSequence(event)
+            val ok = executeSequence(event)
+
+            if (config.debugBreakAfterEvent == true) {
+                debugBreakpoint("After SEQUENCE event ${event.id} (success=$ok)", event)
+                if (!running) return ok
+            }
+
+            return ok
         }
+
 
         // ---------------------------------------------------------------------
         // 2. Handle NO_OP events (instant success, no external interaction)
@@ -342,7 +422,6 @@ class OrcaEngine(
         if (event.type == EventType.NO_OP) {
             logger.info("NO-OP event ${event.id}: ${event.description}")
 
-            // NO_OP gets a deterministic 0ms duration.
             stats.lastDurationMs = 0
             stats.totalDuration += 0
             stats.minDuration = minOf(stats.minDuration, 0)
@@ -350,8 +429,16 @@ class OrcaEngine(
 
             markSuccess(event, stats, emptyMap())
             debug("NO_OP event executed: ${event.id}")
+
+            if (config.debugBreakAfterEvent == true) {
+                debugBreakpoint("After NO_OP event ${event.id}", event)
+                if (!running) return true
+            }
+
             return true
         }
+
+
 
         // ---------------------------------------------------------------------
         // 3. Handle WAIT_FOR_DEVICE events (reboot recovery glue)
@@ -359,8 +446,15 @@ class OrcaEngine(
         if (event.type == EventType.WAIT_FOR_DEVICE) {
             systemInspector.awaitDeviceOnline()
             if (event.waitForBoot) systemInspector.awaitBootCompleted()
+
+            if (config.debugBreakAfterEvent == true) {
+                debugBreakpoint("After WAIT_FOR_DEVICE event ${event.id}", event)
+                if (!running) return true
+            }
+
             return true
         }
+
 
         // ---------------------------------------------------------------------
         // 4. SCRIPT events — metrics + execution timing live here
@@ -442,17 +536,25 @@ class OrcaEngine(
 
         // 4d. Failure handling and logging
         if (!success) {
-            eventFailureCount[event.id] = (eventFailureCount[event.id] ?: 0) + 1
+            stats.failures++
+            eventFailureCount[event.id] = stats.failures
+
             failureLog += FailureRecord(event.id, result.exitCode, result.stderr)
 
             logger.warn("Event ${event.id} failed with exitCode=${result.exitCode}")
             if (event.logErrors && result.stderr.isNotBlank()) {
                 logger.error("stderr for ${event.id}:\n${result.stderr}")
             }
-        } else {
+        }
+         else {
             if (event.logOutput && result.stdout.isNotBlank()) {
                 logger.info("stdout for ${event.id}:\n${result.stdout}")
             }
+        }
+
+        if (!success && config.debugBreakOnError == true) {
+            debugBreakpoint("Event ${event.id} failed with exitCode=${result.exitCode}", event)
+            if (!running) return false
         }
 
         if (success) {
@@ -466,16 +568,29 @@ class OrcaEngine(
             globalMetrics.getOrPut(k) { mutableListOf() }.add(v)
         }
 
-        // 5. Reboot handling
         if (event.causesReboot) {
             logger.warn("Event ${event.id} initiated a reboot. Entering reboot recovery mode...")
+
+            if (config.debugBreakOnReboot == true) {
+                debugBreakpoint("Event ${event.id} is causing a reboot; about to enter reboot recovery.", event)
+                if (!running) return false
+            }
 
             handleRebootRecovery(event)
 
             // After recovery, consider the event successful if no fatal error.
-            // Note: we do not re-run the script; we just mark success and preserve metrics.
             markSuccess(event, stats, metrics)
-            return true
+
+            if (config.debugBreakAfterEvent == true) {
+                debugBreakpoint("After reboot recovery for event ${event.id}", event)
+                if (!running) return true
+            }
+
+            if (config.debugBreakAfterEvent == true) {
+                debugBreakpoint("After event ${event.id} (success=$success)", event)
+                if (!running) return success
+            }
+            return success
         }
 
         // 6. Process monitoring — detect unexpected app death
@@ -506,7 +621,7 @@ class OrcaEngine(
     /** Helper for debug logging that respects config.debug. */
     private fun debug(msg: String) {
         if (config.debug) {
-            logger.info("[DEBUG] $msg")
+            logger.debug("$msg")
         }
     }
 
@@ -611,8 +726,10 @@ class OrcaEngine(
     private fun markSuccess(event: StressEvent, stats: EventStats, metrics: Map<String, Double>) {
         stats.lastExecutionTimeMillis = System.currentTimeMillis()
         stats.executions++
+        stats.successes++
 
         event.setState.forEach { (k, v) -> state[k] = v }
+
         // metrics already merged globally in executeSingleAttempt
     }
 
@@ -626,10 +743,13 @@ class OrcaEngine(
      * If any condition fails, the event is skipped and returns false from
      * [executeEventWithPolicy], but no failure is recorded against the event.
      */
-    private fun checkPreconditions(event: StressEvent): Boolean {
+    private fun checkPreconditions(event:StressEvent,
+                                   onFailure: ((String) -> Unit)? = null
+    ): Boolean {
         // State-based requirements
         for ((key, value) in event.requireState) {
             if (state[key] != value) {
+                onFailure?.invoke("requireState[$key]=$value but actual=${state[key]}")
                 logger.info("Event ${event.id} requires state[$key]=$value but got ${state[key]}")
                 return false
             }
@@ -638,21 +758,49 @@ class OrcaEngine(
         val p = event.preconditions ?: return true
 
         val battery = systemInspector.getBatteryLevel()
-        if (p.batteryAbove != null && battery != null && battery < p.batteryAbove) return false
-        if (p.batteryBelow != null && battery != null && battery > p.batteryBelow) return false
+        if (p.batteryAbove != null && battery != null && battery < p.batteryAbove) {
+            onFailure?.invoke("battery=$battery% < batteryAbove=${p.batteryAbove}%")
+            return false
+        }
+        if (p.batteryBelow != null && battery != null && battery > p.batteryBelow) {
+            onFailure?.invoke("battery=$battery% > batteryBelow=${p.batteryBelow}%")
+            return false
+        }
 
-        if (p.networkRequired == true && systemInspector.isNetworkAvailable() == false) return false
-        if (p.deviceIdle == true && systemInspector.isDeviceIdle() == false) return false
-        if (p.screenOn == true && systemInspector.isScreenOn() == false) return false
-        if (p.chargingRequired == true && systemInspector.isCharging() == false) return false
-        if (p.rootRequired == true && systemInspector.isRootAvailable() == false) return false
-        if (p.adbAvailable == true && systemInspector.adbAvailable() == false) return false
+        if (p.networkRequired == true && systemInspector.isNetworkAvailable() == false) {
+            onFailure?.invoke("networkRequired=true but networkAvailable=false")
+            return false
+        }
+        if (p.deviceIdle == true && systemInspector.isDeviceIdle() == false) {
+            onFailure?.invoke("deviceIdle=true but deviceIdle=false")
+            return false
+        }
+        if (p.screenOn == true && systemInspector.isScreenOn() == false) {
+            onFailure?.invoke("screenOn=true but screenOn=false")
+            return false
+        }
+        if (p.chargingRequired == true && systemInspector.isCharging() == false) {
+            onFailure?.invoke("chargingRequired=true but charging=false")
+            return false
+        }
+        if (p.rootRequired == true && systemInspector.isRootAvailable() == false) {
+            onFailure?.invoke("rootRequired=true but rootAvailable=false")
+            return false
+        }
+        if (p.adbAvailable == true && systemInspector.adbAvailable() == false) {
+            onFailure?.invoke("adbAvailable=true but adbAvailable=false")
+            return false
+        }
 
         for (path in p.fileMustExist) {
-            if (!systemInspector.fileExists(path)) return false
+            if (!systemInspector.fileExists(path)) {
+                onFailure?.invoke("file must exist but missing: $path")
+                return false
+            }
         }
 
         return true
+
     }
 
     /**
@@ -797,29 +945,22 @@ class OrcaEngine(
         }
 
         try {
-            // Start the target app once at the beginning of the run
             systemInspector.startApp(config.targetPackage)
 
             var executedAnySuccess = false
 
-            while (System.currentTimeMillis() < stopTime) {
+            while (System.currentTimeMillis() < stopTime && running) {
                 val success = runOnce(profile)
 
                 if (success) {
                     executedAnySuccess = true
                 }
 
-                // Optional: log failures but do not abort by default
                 if (!success) {
                     logger.warn("Last event failed.")
                 }
             }
 
-            // Safety net: if nothing ever reported success during the run
-            // (e.g., very short duration, aggressive cooldown, or weights),
-            // drive one SCRIPT event explicitly so that callers and tests have
-            // a concrete execution to inspect. Preconditions and failure
-            // policies still apply here.
             if (!executedAnySuccess) {
                 val fallback = config.events.firstOrNull { it.enabled && it.type == EventType.SCRIPT }
                 if (fallback != null) {
@@ -845,12 +986,15 @@ class OrcaEngine(
         }
     }
 
+
     /**
      * Runs the engine for a fixed number of iterations (runOnce calls).
      * Does not control logcat; you can wrap this externally if desired.
      */
     fun runForIterations(iterations: Long, profile: String? = null) {
         for (i in 0 until iterations) {
+            if (!running) break
+
             val success = runOnce(profile)
 
             if (!success) {
@@ -860,6 +1004,7 @@ class OrcaEngine(
         }
         printSummary()
     }
+
 
     /**
      * Resets the RNG with a new seed and clears RNG call count.
@@ -887,11 +1032,11 @@ class OrcaEngine(
      * - Does NOT use logcat (to avoid side effects during replay).
      */
     fun replay(profile: String? = null, path: String = "replay_state.json") {
-        println("[REPLAY] Starting deterministic replay…")
+        logger.info("[REPLAY] Starting deterministic replay…")
 
         // 1) Load saved seed + RNG call count
         val replay = loadReplayState(path)
-        println("[REPLAY] Loaded state: seed=${replay.seed}, rngCalls=${replay.rngCalls}")
+        logger.info("[REPLAY] Loaded state: seed=${replay.seed}, rngCalls=${replay.rngCalls}")
 
         // 2) Reset RNG and engine state to *fresh* start
         setSeed(replay.seed)      // sets rng = Random(seed) and rngCalls = 0
@@ -899,7 +1044,7 @@ class OrcaEngine(
 
         val targetCalls = replay.rngCalls
 
-        println("[REPLAY] Replaying until rngCalls reaches $targetCalls ...")
+        logger.info("[REPLAY] Replaying until rngCalls reaches $targetCalls ...")
 
         replayMode = true
 
@@ -908,17 +1053,17 @@ class OrcaEngine(
             val ok = runOnce(profile)
 
             if (!ok) {
-                println("[REPLAY] (info) Event returned false during replay but continuing… (rngCalls=$rngCalls)")
+                logger.info("[REPLAY] (info) Event returned false during replay but continuing… (rngCalls=$rngCalls)")
             }
         }
 
-        println("[REPLAY] RNG call count matched original run (rngCalls=$rngCalls).")
+        logger.info("[REPLAY] RNG call count matched original run (rngCalls=$rngCalls).")
 
         // 4) Execute ONE MORE event (the one that originally failed).
-        println("[REPLAY] Executing final failing event…")
+        logger.info("[REPLAY] Executing final failing event…")
         val finalSuccess = runOnce(profile)
 
-        println("[REPLAY] Replay complete. finalSuccess=$finalSuccess")
+        logger.info("[REPLAY] Replay complete. finalSuccess=$finalSuccess")
         printSummary()
     }
 
@@ -985,8 +1130,9 @@ class OrcaEngine(
         config.events.forEach { event ->
             val stats = eventStats[event.id]
             val execs = stats?.executions ?: 0
-            val failures = eventFailureCount[event.id] ?: 0
-            val successes = execs - failures
+            val successes = stats?.successes ?: 0
+            val failures = stats?.failures ?: 0
+
             val duration = formatDuration(stats?.lastDurationMs)
 
             val eventCol = Ansi.magenta(event.id, color)
@@ -998,8 +1144,12 @@ class OrcaEngine(
 
             println(
                 String.format(
-                    "%-50s %-10d %-10s %-10s %-20s",
-                    eventCol, execs, successCol, failureCol, durationCol
+                    "%-50s %-10d %-10d %-10d %-20s",
+                    event.id,
+                    execs,
+                    successes,
+                    failures,
+                    duration
                 )
             )
         }
@@ -1081,4 +1231,109 @@ class OrcaEngine(
             append("${seconds}s ${millis}ms")
         }
     }
+
+    /**
+     * Interactive step-mode prompt shown when debugBreakBeforeEvent is enabled.
+     *
+     * Option B behavior:
+     *  - We already selected the event.
+     *  - We display info about the event.
+     *  - We wait for a command:
+     *      [Enter]/s/step → execute this event
+     *      c/cont/continue → run this event AND turn off further breaks
+     *      q/quit/exit → request engine stop
+     */
+    private fun promptBeforeEvent(event: StressEvent): Boolean {
+
+        if (event.debugBreak == true && !debugBreakActive) {
+            println("⛔ Event-level breakpoint triggered (debugBreak = true)")
+        } else if (debugBreakActive) {
+            println("⛔ Global step mode active (debugBreakBeforeEvent = true)")
+        }
+        println()
+        println("───────────────────── STEP BREAK ─────────────────────")
+        println("Next event: ${event.id}")
+        println("  type : ${event.type}")
+        println("  mode : ${event.mode}")
+        if (!event.description.isNullOrBlank()) {
+            println("  desc : ${event.description}")
+        }
+        if (!event.tags.isNullOrEmpty()) {
+            println("  tags : ${event.tags.joinToString(", ")}")
+        }
+        if (event.safetyLevel != null) {
+            println("  safety : ${event.safetyLevel}")
+        }
+        println("Commands: [Enter]/s/step = run, c = continue (no more breaks), q = quit")
+        print("step> ")
+
+        val line = readLine()?.trim().orEmpty()
+
+        return when (line.lowercase()) {
+            "", "s", "step" -> {
+                // Run this event, keep breaking before future events
+                true
+            }
+
+            "c", "cont", "continue" -> {
+                println("Continuing without further breaks for this run.")
+                debugBreakActive = false
+                true
+            }
+
+            "q", "quit", "exit" -> {
+                println("Stopping engine by user request.")
+                running = false
+                false
+            }
+
+            else -> {
+                println("Unrecognized command '$line'. Running event.")
+                true
+            }
+        }
+    }
+
+    /**
+     * Interactive debug breakpoint.
+     *
+     * Shows why we stopped and lets the user:
+     *  - [Enter]: continue
+     *  - i: inspect event + state
+     *  - q: stop engine (sets [running] = false)
+     */
+    private fun debugBreakpoint(reason: String, event: StressEvent) {
+        println()
+        println("──────────────── ORCA DEBUG BREAKPOINT ────────────────")
+        println("Reason : $reason")
+        println("Event  : ${event.id} (type=${event.type}, mode=${event.mode})")
+        println("Execs  : ${eventStats[event.id]?.executions ?: 0}")
+        println("State  : $state")
+        println("-------------------------------------------------------")
+        println("Commands: [Enter]=continue, i=inspect event/state, q=quit engine")
+
+        while (true) {
+            print("debug> ")
+            val line = debugReader.readLine() ?: return
+            when (line.trim().lowercase()) {
+                "" -> return
+                "i", "info" -> {
+                    println("\n--- Event definition ---")
+                    println(event)
+                    println("\n--- Engine state ---")
+                    println("state       = $state")
+                    println("eventStats  = ${eventStats[event.id]}")
+                    println("failures    = ${eventFailureCount[event.id] ?: 0}")
+                    println("-------------------------")
+                }
+                "q", "quit", "exit" -> {
+                    println("Debug: marking engine as stopped by user request.")
+                    running = false
+                    return
+                }
+                else -> println("Unknown command. Use Enter, i or q.")
+            }
+        }
+    }
+
 }

@@ -1,0 +1,184 @@
+{
+  "name": "ORCA SUPER DEMO — Full Feature Showcase",
+  "description": "A complete demonstration of Orca's capabilities using shell commands and mock adb behavior.",
+  "randomSeed": 987654321,
+  "debug": true,
+  "targetPackage": "com.example.demoapp",
+
+  "defaultSlowThresholdMillis": 2000,
+
+  "defaultRetry": {
+    "maxAttempts": 3,
+    "backoffSeconds": 1,
+    "strategy": "EXPONENTIAL"
+  },
+
+  "logcat": {
+    "enabled": false
+  },
+
+  "events": [
+
+    {
+      "id": "startup_sequence",
+      "description": "Prepare system for testing.",
+      "type": "SEQUENCE",
+      "mode": "RANDOM",
+      "weight": 3,
+      "sequence": ["check_environment", "start_mock_services"]
+    },
+
+    {
+      "id": "check_environment",
+      "description": "Verifies that the mock environment is present.",
+      "type": "SCRIPT",
+      "mode": "SEQUENTIAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[Startup] Checking mock environment...'",
+          "sleep 1",
+          "echo '[Startup] MOCK ENV OK'"
+        ]
+      },
+      "metrics": {
+        "captureCpuUsage": true,
+        "captureMemoryUsage": true
+      }
+    },
+
+    {
+      "id": "start_mock_services",
+      "description": "Simulates starting system services.",
+      "type": "SCRIPT",
+      "mode": "SEQUENTIAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[Startup] Starting mock services...'",
+          "sleep 1",
+          "echo '[Startup] Services started.'"
+        ]
+      }
+    },
+
+    {
+      "id": "mock_adb_ping",
+      "description": "Demonstrates calling mock ADB.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 5,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[ADB] Mock ping:'",
+          "./mock_adb.sh shell 'echo device OK'"
+        ]
+      },
+      "metrics": {
+        "captureCpuUsage": true
+      }
+    },
+
+    {
+      "id": "cpu_stress_test",
+      "description": "Simulates high CPU usage.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 4,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[CPU] Simulating high CPU usage...'",
+          "sleep 2",
+          "echo 'CPU=85'"
+        ]
+      },
+      "metrics": {
+        "captureCpuUsage": true
+      },
+      "conditionalTriggers": [
+        {
+          "triggerEventId": "cpu_alert_handler",
+          "ifOutputContains": "CPU"
+        }
+      ]
+    },
+
+    {
+      "id": "cpu_alert_handler",
+      "description": "Handles CPU alerts.",
+      "type": "NO_OP",
+      "mode": "CONDITIONAL",
+      "logOutput": true,
+      "setState": { "cpu_state": "high" }
+    },
+
+    {
+      "id": "network_latency_test",
+      "description": "Simulates poor network performance.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 3,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[NET] Simulating network latency...'",
+          "sleep 1",
+          "echo 'LATENCY=450'"
+        ]
+      },
+      "metrics": {
+        "customMetrics": ["netLatency"]
+      },
+      "conditionalTriggers": [
+        {
+          "triggerEventId": "latency_handler",
+          "ifMetricAbove": { "netLatency": 300 }
+        }
+      ]
+    },
+
+    {
+      "id": "latency_handler",
+      "description": "Handles high latency.",
+      "type": "SCRIPT",
+      "mode": "CONDITIONAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[NET] Recovering from high latency...'",
+          "sleep 1"
+        ]
+      }
+    },
+
+    {
+      "id": "mock_reboot_event",
+      "description": "Simulates a device reboot.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 1,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'MOCK REBOOT TRIGGERED!'",
+          "./demo/mock_adb.sh reboot"
+        ]
+      },
+      "causesReboot": true,
+      "waitForBoot": true,
+      "restartAppAfterBoot": true
+    },
+
+    {
+      "id": "phase_change_event",
+      "description": "Transitions Orca’s internal state machine.",
+      "type": "NO_OP",
+      "mode": "RANDOM",
+      "weight": 2,
+      "requireState": { "cpu_state": "high" },
+      "setState": { "phase": "stress_phase" }
+    }
+  ]
+}

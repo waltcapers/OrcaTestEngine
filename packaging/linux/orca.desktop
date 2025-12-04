@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Orca
+Comment=Deterministic Android stress test engine
+Exec=/usr/bin/orca
+Icon=orca
+Terminal=true
+Categories=Development;Utility;
+./

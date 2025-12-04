@@ -74,7 +74,8 @@ object DetectAdbCommand {
         val inspector = AdbSystemInspector(
             adb = adbExecutor,
             defaultPackageName = null,
-            debug = true
+            debug = true,
+            logger = logger
         )
 
         val adbOk = inspector.adbAvailable()

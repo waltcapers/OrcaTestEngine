@@ -39,6 +39,7 @@
 package orca.cli
 
 import orca.cli.util.Ansi
+import orca.cli.util.Banner
 import kotlin.system.exitProcess
 
 // ==========================================================================================
@@ -53,7 +54,8 @@ data class GlobalCliOptions(
     val timeoutMs: Long? = null,
     val colorEnabled: Boolean = true,
     val artifactsDir: String? = null,
-    val helpRequested: Boolean = false
+    val helpRequested: Boolean = false,
+    val stepMode: Boolean = false          // NEW: single-step debug mode
 )
 
 /**
@@ -81,6 +83,8 @@ object OrcaCLI {
 
     @JvmStatic
     fun main(args: Array<String>) {
+
+        Banner.printStartupBanner(true)
         if (args.isEmpty()) {
             printUsage()
             return
@@ -128,6 +132,7 @@ object OrcaCLI {
         var colorEnabled = true
         var artifactsDir: String? = null
         var helpRequested = false
+        var stepMode = false   // NEW
 
         val tokens = args.toMutableList()
 
@@ -198,6 +203,12 @@ object OrcaCLI {
                     continue
                 }
 
+                "--step" -> {   // NEW
+                    stepMode = true
+                    i++
+                    continue
+                }
+
                 "--help", "-h" -> {
                     helpRequested = true
                     i++
@@ -226,7 +237,8 @@ object OrcaCLI {
             timeoutMs = timeoutMs,
             colorEnabled = colorEnabled,
             artifactsDir = artifactsRoot,
-            helpRequested = helpRequested
+            helpRequested = helpRequested,
+            stepMode = stepMode          // NEW
         )
 
         OrcaCliContextHolder.globalOptions = opts
@@ -240,7 +252,7 @@ object OrcaCLI {
     ): GlobalCliOptions {
 
         val isRunLike = when (command) {
-            "run", "dry-run", "profile", "run-event", "replay" -> true
+            "run", "dry-run", "profile", "run-event", "replay", "run-mock" -> true
             else -> false
         }
 
@@ -278,8 +290,19 @@ object OrcaCLI {
                         printError("Missing config file.", opts); printUsage(); 1
                     } else {
                         println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Running ${args[0]}…", opts.colorEnabled))
-                        RunCommand.run(args[0])
+                        RunCommand.run(args[0], opts)   // CHANGED
                         println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} run complete.", opts.colorEnabled))
+                        0
+                    }
+                }
+
+                "run-mock" -> {
+                    if (args.isEmpty()) {
+                        printError("Missing config file.", opts); printUsage(); 1
+                    } else {
+                        println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Running (mock) ${args[0]}…", opts.colorEnabled))
+                        RunMockCommand.run(args[0], opts)  // NEW COMMAND (expects opts)
+                        println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} mock run complete.", opts.colorEnabled))
                         0
                     }
                 }
@@ -397,7 +420,7 @@ object OrcaCLI {
     }
 
     // ======================================================================================
-    //  INTERACTIVE SHELL
+    //  INTERACTIVE SHELL  (unchanged, but now benefits from --step too)
     // ======================================================================================
 
     private object InteractiveShell {
@@ -482,10 +505,12 @@ object OrcaCLI {
         println("  --artifacts-dir <path> Artifact output root directory")
         println("  --debug                Verbose logging")
         println("  --no-color             Disable ANSI output")
+        println("  --step                 Single-step mode (run one event at a time)")
         println("  --help, -h             Show help\n")
 
         println(Ansi.blue("Commands:", opts.colorEnabled))
-        println("  run <cfg>              Execute full stress test")
+        println("  run <cfg>              Execute full stress test (ADB)")
+        println("  run-mock <cfg>         Execute using mock inspector (no ADB)")
         println("  validate <cfg>         Validate config schema")
         println("  replay                 Replay last failure deterministically")
         println("  dry-run <cfg>          Print events without running")
@@ -501,6 +526,8 @@ object OrcaCLI {
 
         println(Ansi.gray("Examples:", opts.colorEnabled))
         println("  orca run config.json --device emulator-5554")
+        println("  orca --step run config.json")
+        println("  orca --step run-mock mock-config.json")
         println("  orca validate config.json")
         println("  orca run config.json --timeout-ms 30000")
         println()

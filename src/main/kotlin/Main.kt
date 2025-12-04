@@ -70,10 +70,11 @@ fun mainTest() {
                 logger = logger
             ),
             defaultPackageName = config.targetPackage,
-            debug = false
+            debug = false,
+            logger = logger
         )
     } else {
-        DefaultSystemInspector( debug = true)
+        DefaultSystemInspector( debug = true, logger)
     }
 
     val scriptRunner = ScriptRunnerDispatcher()

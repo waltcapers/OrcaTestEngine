@@ -70,6 +70,16 @@ data class EventStats(
     var executions: Int = 0,
 
     /**
+     * number of successful runs
+     */
+    var successes: Int = 0,
+
+    /**
+     * number of failed runs
+     */
+    var failures:Int = 0,
+
+    /**
      * When true, the engine will skip this event entirely.
      * Primarily used by `FailurePolicy.SKIP_FUTURE`.
      */

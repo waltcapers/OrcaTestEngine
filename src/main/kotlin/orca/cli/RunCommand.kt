@@ -1,42 +1,3 @@
-/*
- * Dual License Notice
- * -------------------
- *
- * This file is part of the OrcaTestEngine project.
- *
- * Copyright (c) 2025 Walter E. Capers
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * MIT License Conditions (for all parties except GM)
- * --------------------------------------------------
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * General Motors License Exception
- * --------------------------------
- * General Motors (GM) is granted a perpetual, irrevocable, worldwide,
- * royalty-free license to use, modify, reproduce, publish, distribute,
- * sublicense, and create derivative works from this Software for any internal
- * or commercial purpose.
- *
- * The GM License Exception applies exclusively to General Motors and does not
- * extend to any other third party or organization.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
-
 package orca.cli
 
 import orca.engine.config.StressConfigLoader
@@ -52,13 +13,14 @@ import java.io.File
  *
  * Responsibilities:
  *  - Load and validate configuration
- *  - Construct the appropriate inspector (ADB or default)
+ *  - Construct the appropriate inspector (ADB)
  *  - Build the engine
  *  - Execute for duration or runLoop
+ *  - Optionally run in single-step mode (--step)
  */
 object RunCommand {
 
-    fun run(configPath: String) {
+    fun run(configPath: String, cliOptions: GlobalCliOptions) {
         val logger = ConsoleEngineLogger()
         val configFile = File(configPath)
 
@@ -75,11 +37,12 @@ object RunCommand {
         val inspector = AdbSystemInspector(
             adb = DefaultAdbExecutor(
                 adbPath = "adb",
-                deviceSerial = null,
+                deviceSerial = cliOptions.deviceId,
                 logger = logger
             ),
             defaultPackageName = config.targetPackage,
-            debug = config.debug
+            debug = config.debug,
+            logger = logger
         )
 
         val scriptRunner = ScriptRunnerDispatcher()
@@ -97,6 +60,40 @@ object RunCommand {
             engine.stop()
         })
 
+        // --------------------------------------------------------------------
+        //  STEP MODE: run one event at a time when --step is provided
+        // --------------------------------------------------------------------
+        if (cliOptions.stepMode) {
+            println()
+            println("▶ Step mode enabled. Press <Enter> to run the next event, or type 'q' to quit.")
+            val reader = System.`in`.bufferedReader()
+
+            while (true) {
+                print("step> ")
+                val line = reader.readLine() ?: break
+                val trimmed = line.trim()
+
+                if (trimmed.equals("q", ignoreCase = true) ||
+                    trimmed.equals("quit", ignoreCase = true) ||
+                    trimmed.equals("exit", ignoreCase = true)
+                ) {
+                    println("Exiting step mode.")
+                    break
+                }
+
+                val success = engine.runOnce()
+                if (!success) {
+                    println("Last event failed (see logs for details).")
+                }
+            }
+
+            engine.printSummary()
+            return
+        }
+
+        // --------------------------------------------------------------------
+        //  NORMAL BEHAVIOR (unchanged)
+        // --------------------------------------------------------------------
         if (config.maxTestDurationSeconds != null) {
             engine.runForDuration(config.maxTestDurationSeconds.toLong())
             engine.saveReplayState()

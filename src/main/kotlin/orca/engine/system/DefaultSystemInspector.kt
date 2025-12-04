@@ -39,6 +39,7 @@
 
 package orca.engine.system
 
+import orca.engine.core.EngineLogger
 import orca.engine.model.SystemInspector
 import orca.engine.model.MetricsConfig
 
@@ -56,11 +57,12 @@ import orca.engine.model.MetricsConfig
  * before integrating with a real Android device.
  */
 class DefaultSystemInspector(
-    private val debug: Boolean = true
+    private val debug: Boolean = true,
+    private val logger: EngineLogger
 ) : SystemInspector {
 
     private fun dbg(msg: String) {
-        if (debug) println("[DefaultSystemInspector] $msg")
+        if (debug) logger.debug ("[DefaultSystemInspector] $msg")
     }
 
     override fun getBatteryLevel(): Int? {

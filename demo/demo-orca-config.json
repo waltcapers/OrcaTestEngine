@@ -1,0 +1,169 @@
+{
+  "name": "Orca Demo — Dry Run & Mock Execution",
+  "description": "A fully mockable ORCA scenario using only shell commands and a mocked adb script.",
+  "randomSeed": 12345,
+  "debug": true,
+
+  "targetPackage": "com.example.fakeapp",
+
+  "defaultSlowThresholdMillis": 1500,
+
+  "defaultRetry": {
+    "maxAttempts": 2,
+    "backoffSeconds": 1,
+    "strategy": "LINEAR"
+  },
+
+  "logcat": {
+    "enabled": false
+  },
+
+  "events": [
+    {
+      "id": "warmup_sequence",
+      "description": "Initial warm-up steps",
+      "type": "SEQUENCE",
+      "mode": "RANDOM",
+      "weight": 3,
+      "enabled": true,
+      "sequence": ["warmup_1", "warmup_2"]
+    },
+
+    {
+      "id": "warmup_1",
+      "description": "Shell warm-up step 1",
+      "type": "SCRIPT",
+      "mode": "SEQUENTIAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[Warmup] Step 1: preparing demo environment'",
+          "sleep 1"
+        ]
+      }
+    },
+
+    {
+      "id": "warmup_2",
+      "description": "Shell warm-up step 2",
+      "type": "SCRIPT",
+      "mode": "SEQUENTIAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[Warmup] Step 2: environment ready!'",
+          "sleep 1"
+        ]
+      }
+    },
+
+    {
+      "id": "mock_adb_call",
+      "description": "Demonstrates calling the mock ADB script",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 5,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Simulating ADB call using mock_adb.sh...'",
+          "./demo/mock_adb.sh shell 'echo hello from mock-adb'"
+        ]
+      },
+      "metrics": {
+        "captureCpuUsage": true,
+        "captureMemoryUsage": true
+      }
+    },
+
+    {
+      "id": "simulated_failure",
+      "description": "Demonstrates retry behavior",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 2,
+      "stopOnFailure": true,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Simulating failure...'",
+          "exit 1"
+        ]
+      },
+      "onFailure": "RETRY",
+      "retryPolicy": {
+        "maxAttempts": 2,
+        "backoffSeconds": 1,
+        "strategy": "LINEAR"
+      }
+    },
+
+    {
+      "id": "mock_reboot",
+      "description": "Simulates a device reboot using the mock adb script",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 1,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Mock reboot event triggered...'",
+          "./demo/mock_adb.sh reboot"
+        ]
+      },
+      "causesReboot": true,
+      "waitForBoot": true,
+      "restartAppAfterBoot": true
+    },
+
+    {
+      "id": "conditional_event_source",
+      "description": "Outputs text to drive conditional triggers",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "weight": 2,
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'METRIC: simulated_latency=500'",
+          "echo 'ALERT: CPU spike detected!'"
+        ]
+      },
+      "conditionalTriggers": [
+        {
+          "triggerEventId": "handle_latency",
+          "ifOutputContains": "simulated_latency"
+        },
+        {
+          "triggerEventId": "handle_cpu_alert",
+          "ifOutputContains": "CPU spike"
+        }
+      ]
+    },
+
+    {
+      "id": "handle_latency",
+      "description": "Event triggered by latency text in script output",
+      "type": "NO_OP",
+      "mode": "CONDITIONAL",
+      "logOutput": true,
+      "setState": {
+        "latency_state": "high"
+      }
+    },
+
+    {
+      "id": "handle_cpu_alert",
+      "description": "Event triggered by CPU alert",
+      "type": "SCRIPT",
+      "mode": "CONDITIONAL",
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo 'Responding to CPU alert...'",
+          "sleep 1"
+        ]
+      }
+    }
+  ]
+}

@@ -155,6 +155,17 @@ data class OrcaTestConfig(
      */
     val debug: Boolean = false,
 
+    /**
+     * Optional debug step triggers
+     * (default to false)
+     */
+    val debugBreakBeforeEvent: Boolean? = null,
+    val debugBreakAfterEvent: Boolean? = null,
+    val debugBreakOnError: Boolean? = null,
+    val debugBreakOnRetry: Boolean? = null,
+    val debugBreakOnReboot: Boolean? = null,
+    val debugBreakWhenPreconditionsFail: Boolean? = null,
+
     // -------------------------------------------------------------------------
     // Duration control
     // -------------------------------------------------------------------------
@@ -199,4 +210,5 @@ data class OrcaTestConfig(
      * and recovery completes successfully.
      */
     val postRebootScript: String? = null
+
 )

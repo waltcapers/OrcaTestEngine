@@ -61,6 +61,35 @@
       "default": false,
       "description": "When true, OrcaEngine emits additional debug logging about selection, cooldowns, and triggers."
     },
+    "debugBreakBeforeEvent": {
+      "type": ["boolean", "null"],
+      "description": "If true, Orca pauses before executing each event and prompts on the console."
+    },
+    "debugBreakAfterEvent": {
+      "type": ["boolean", "null"],
+      "description": "If true, Orca pauses after each event completes and prompts on the console."
+    },
+    "debugBreakOnError": {
+      "type": ["boolean", "null"],
+      "description": "If true, Orca pauses whenever an event fails (non-zero exit code or failure policy) and prompts on the console."
+    },
+    "debugBreakOnRetry": {
+      "type": ["boolean", "null"],
+      "description": "If true, Orca pauses whenever an event enters its retry loop."
+    },
+    "debugBreakOnReboot": {
+      "type": ["boolean", "null"],
+      "description": "If true, Orca pauses when an event that causesReboot=true is about to enter reboot recovery."
+    },
+    "debugBreakWhenPreconditionsFail": {
+      "type": ["boolean", "null"],
+      "description": "If true, Orca pauses whenever an event is skipped due to failing preconditions or requireState."
+    },
+
+    "debugBreakBeforeEvent": {
+      "type": ["boolean", "null"],
+      "description": "If true, OrcaEngine enters interactive step mode and pauses before executing each selected event."
+    },
 
     "maxTestDurationSeconds": {
       "type": ["integer", "null"],
@@ -110,7 +139,11 @@
           "type": "string",
           "description": "Unique logical ID for this event. Must be unique across all events."
         },
-
+        "stopOnFailure": {
+          "type": "boolean",
+          "description": "If true, the engine stops immediately when this event fails.",
+          "default": false
+        },
         "description": {
           "type": ["string", "null"],
           "description": "Optional human-readable description of the event."
@@ -307,6 +340,11 @@
         "logFile": {
           "type": ["string", "null"],
           "description": "Optional file path for event-specific logging."
+        },
+
+        "debugBreak": {
+          "type": ["boolean", "null"],
+          "description": "If true, OrcaEngine pauses before executing this event (event-level breakpoint)."
         }
       }
     },

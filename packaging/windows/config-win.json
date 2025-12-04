@@ -1,0 +1,5 @@
+{
+  "vendor": "Walter E. Capers",
+  "description": "Orca deterministic stress test engine.",
+  "license": "MIT + GM License Exception"
+}

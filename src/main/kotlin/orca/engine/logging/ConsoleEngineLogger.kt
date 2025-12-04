@@ -52,6 +52,7 @@ import orca.engine.core.EngineLogger
  * - `[INFO]` for normal operational messages
  * - `[WARN]` for recoverable or unexpected conditions
  * - `[ERROR]` for failures, optionally including a stack trace
+ * - `[DEBUG]` for debug information
  *
  * This implementation is deliberately lightweight and has no external
  * dependencies. For production environments, CI systems, or structured
@@ -91,5 +92,9 @@ class ConsoleEngineLogger : EngineLogger {
         } else {
             println("[ERROR] $message")
         }
+    }
+
+    override fun debug(message: String) {
+        println("[DEBUG] $message")
     }
 }

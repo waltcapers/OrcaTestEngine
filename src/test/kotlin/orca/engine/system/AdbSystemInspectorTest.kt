@@ -14,6 +14,7 @@
 
 package orca.engine.system
 
+import orca.engine.core.EngineLogger
 import orca.engine.model.MetricsConfig
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
@@ -44,7 +45,8 @@ class AdbSystemInspectorTest {
      */
     private fun inspector(
         shellMap: Map<String, AdbResult>,
-        execMap: Map<List<String>, AdbResult> = emptyMap()
+        execMap: Map<List<String>, AdbResult> = emptyMap(),
+        logger: EngineLogger
     ): AdbSystemInspector {
 
         val fake = FakeAdbExecutor(
@@ -67,7 +69,8 @@ class AdbSystemInspectorTest {
         return AdbSystemInspector(
             adb = fake,
             defaultPackageName = "com.example.test",
-            debug = false
+            debug = false,
+            logger = logger
         )
     }
 

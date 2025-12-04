@@ -40,7 +40,6 @@
 package orca.cli
 
 import orca.engine.config.StressConfigLoader
-import orca.engine.core.EngineLogger
 import orca.engine.core.OrcaEngine
 import orca.engine.core.ScriptRunnerDispatcher
 import orca.engine.logging.ConsoleEngineLogger
@@ -50,28 +49,16 @@ import java.io.File
 /**
  * Implements:
  *
- *   orca profile <config.json> [iterations]
+ *   orca run-mock <config.json>
  *
  * Behavior:
  *   - Loads config.
- *   - Runs the engine for N iterations using runForIterations().
- *   - Relies on OrcaEngine.printSummary() to show:
- *       * how many times each event executed
- *       * failures
- *       * metrics
- *
- * This is essentially a “quick distribution sampler” useful for:
- *   - Seeing how weights affect selection frequency.
- *   - Confirming that cooldown and maxExecutions behave as expected.
- *
- * NOTE:
- *   - We use DefaultSystemInspector so this is safe without Android attached.
- *   - For configs that truly depend on ADB, you can later build a variant
- *     that uses AdbSystemInspector instead.
+ *   - Uses DefaultSystemInspector (no ADB calls).
+ *   - Runs the engine either normally or in step mode (--step).
  */
-object ProfileCommand {
+object RunMockCommand {
 
-    fun run(configPath: String, iterations: Int) {
+    fun run(configPath: String, cliOptions: GlobalCliOptions) {
         val file = File(configPath)
         if (!file.exists()) {
             println("❌ Config file not found: ${file.absolutePath}")
@@ -87,7 +74,8 @@ object ProfileCommand {
         }
 
         val logger = ConsoleEngineLogger()
-        val inspector = DefaultSystemInspector(debug = false, logger)
+        val inspector = DefaultSystemInspector(logger = ConsoleEngineLogger(),
+            debug = config.debug)
         val scriptRunner = ScriptRunnerDispatcher()
 
         val engine = OrcaEngine(
@@ -97,8 +85,50 @@ object ProfileCommand {
             logger = logger
         )
 
-        println("Profiling selection behavior for $iterations iteration(s)...")
-        engine.runForIterations(iterations.toLong())
-        // OrcaEngine.runForIterations() already calls printSummary() at the end.
+        // Shutdown hook for CTRL+C
+        Runtime.getRuntime().addShutdownHook(Thread {
+            println("\nStopping engine...")
+            engine.stop()
+        })
+
+        // --------------------------------------------------------------------
+        //  STEP MODE: same UX as real run, but using mock inspector
+        // --------------------------------------------------------------------
+        if (cliOptions.stepMode) {
+            println()
+            println("▶ Step mode (mock) enabled. Press <Enter> to run the next event, or type 'q' to quit.")
+            val reader = System.`in`.bufferedReader()
+
+            while (true) {
+                print("step> ")
+                val line = reader.readLine() ?: break
+                val trimmed = line.trim()
+
+                if (trimmed.equals("q", ignoreCase = true) ||
+                    trimmed.equals("quit", ignoreCase = true) ||
+                    trimmed.equals("exit", ignoreCase = true)
+                ) {
+                    println("Exiting step mode (mock).")
+                    break
+                }
+
+                val success = engine.runOnce()
+                if (!success) {
+                    println("Last event failed (see logs for details).")
+                }
+            }
+
+            engine.printSummary()
+            return
+        }
+
+        // --------------------------------------------------------------------
+        //  NORMAL MOCK BEHAVIOR (no logcat, no adb)
+        // --------------------------------------------------------------------
+        if (config.maxTestDurationSeconds != null) {
+            engine.runForDuration(config.maxTestDurationSeconds.toLong())
+        } else {
+            engine.runLoop()
+        }
     }
 }

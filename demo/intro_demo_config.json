@@ -1,0 +1,45 @@
+{
+  "name": "Minimal Orca Demo",
+  "randomSeed": 123,
+  "debug": false,
+  "targetPackage": "com.example.demoapp",
+
+  "events": [
+    {
+      "id": "hello_world",
+      "description": "Simple echo script.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "language": "SHELL",
+      "script": { "inline": ["echo 'Hello from Orca!'"] }
+    },
+
+    {
+      "id": "mock_adb_test",
+      "description": "Demonstrates mock adb behavior.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "language": "SHELL",
+      "script": {
+        "inline": ["./demo/mock_adb.sh shell 'echo hi'"]
+      }
+    },
+
+    {
+      "id": "quick_fail",
+      "description": "Shows retry behavior.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "language": "SHELL",
+      "script": {
+        "inline": ["echo 'Simulating failure...'", "exit 1"]
+      },
+      "retryPolicy": {
+        "maxAttempts": 2,
+        "backoffSeconds": 1,
+        "strategy": "LINEAR"
+      },
+      "onFailure": "LOG_ONLY"
+    }
+  ]
+}

@@ -98,4 +98,5 @@ interface EngineLogger {
      * @param t Optional throwable representing the underlying cause.
      */
     fun error(message: String, t: Throwable? = null)
+    fun debug(message: String)
 }

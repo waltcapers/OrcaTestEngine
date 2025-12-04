@@ -95,7 +95,7 @@ object RunEventCommand {
         )
 
         val logger = ConsoleEngineLogger()
-        val inspector = DefaultSystemInspector(debug = true)
+        val inspector = DefaultSystemInspector(debug = true, logger)
         val scriptRunner = ScriptRunnerDispatcher()
 
         val engine = OrcaEngine(
