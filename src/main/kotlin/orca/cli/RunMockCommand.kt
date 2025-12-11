@@ -39,8 +39,9 @@
 
 package orca.cli
 
-import orca.engine.config.StressConfigLoader
+import orca.engine.config.OrcaConfigLoader
 import orca.engine.core.OrcaEngine
+import orca.engine.core.OrcaEngineFactory
 import orca.engine.core.ScriptRunnerDispatcher
 import orca.engine.logging.ConsoleEngineLogger
 import orca.engine.system.DefaultSystemInspector
@@ -66,61 +67,29 @@ object RunMockCommand {
         }
 
         val config = try {
-            StressConfigLoader.load(configPath)
+            OrcaConfigLoader.load(configPath)
         } catch (ex: Exception) {
             println("❌ Failed to load config: ${ex.message}")
             ex.printStackTrace()
             return
         }
 
-        val logger = ConsoleEngineLogger()
-        val inspector = DefaultSystemInspector(logger = ConsoleEngineLogger(),
-            debug = config.debug)
-        val scriptRunner = ScriptRunnerDispatcher()
-
-        val engine = OrcaEngine(
-            config = config,
-            systemInspector = inspector,
-            scriptRunner = scriptRunner,
-            logger = logger
+        val engine = OrcaEngineFactory.newEngine(
+            targetPackage = config.targetPackage,
+            mockMode = true,
+            configAttrib =  config,
+            logger = ConsoleEngineLogger(),
         )
+        if (engine == null) {
+            println("❌ Failed to create Orca Engine")
+            return
+        }
 
         // Shutdown hook for CTRL+C
         Runtime.getRuntime().addShutdownHook(Thread {
             println("\nStopping engine...")
             engine.stop()
         })
-
-        // --------------------------------------------------------------------
-        //  STEP MODE: same UX as real run, but using mock inspector
-        // --------------------------------------------------------------------
-        if (cliOptions.stepMode) {
-            println()
-            println("▶ Step mode (mock) enabled. Press <Enter> to run the next event, or type 'q' to quit.")
-            val reader = System.`in`.bufferedReader()
-
-            while (true) {
-                print("step> ")
-                val line = reader.readLine() ?: break
-                val trimmed = line.trim()
-
-                if (trimmed.equals("q", ignoreCase = true) ||
-                    trimmed.equals("quit", ignoreCase = true) ||
-                    trimmed.equals("exit", ignoreCase = true)
-                ) {
-                    println("Exiting step mode (mock).")
-                    break
-                }
-
-                val success = engine.runOnce()
-                if (!success) {
-                    println("Last event failed (see logs for details).")
-                }
-            }
-
-            engine.printSummary()
-            return
-        }
 
         // --------------------------------------------------------------------
         //  NORMAL MOCK BEHAVIOR (no logcat, no adb)

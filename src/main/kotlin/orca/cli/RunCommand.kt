@@ -1,9 +1,10 @@
 package orca.cli
 
-import orca.engine.config.StressConfigLoader
+import orca.engine.config.OrcaConfigLoader
 import orca.engine.logging.ConsoleEngineLogger
 import orca.engine.core.ScriptRunnerDispatcher
 import orca.engine.core.OrcaEngine
+import orca.engine.core.OrcaEngineFactory
 import orca.engine.system.AdbSystemInspector
 import orca.engine.system.DefaultAdbExecutor
 import java.io.File
@@ -21,7 +22,6 @@ import java.io.File
 object RunCommand {
 
     fun run(configPath: String, cliOptions: GlobalCliOptions) {
-        val logger = ConsoleEngineLogger()
         val configFile = File(configPath)
 
         if (!configFile.exists()) {
@@ -31,28 +31,24 @@ object RunCommand {
 
         println("ℹ️  Loading config: $configPath")
 
-        val config = StressConfigLoader.load(configPath)
+        val config = try {
+            OrcaConfigLoader.load(configPath)
+        } catch (ex: Exception) {
+            println("❌ Failed to load config: ${ex.message}")
+            ex.printStackTrace()
+            return
+        }
 
-        // ---- Create ADB inspector (default mode) ----
-        val inspector = AdbSystemInspector(
-            adb = DefaultAdbExecutor(
-                adbPath = "adb",
-                deviceSerial = cliOptions.deviceId,
-                logger = logger
-            ),
-            defaultPackageName = config.targetPackage,
-            debug = config.debug,
-            logger = logger
+        val engine = OrcaEngineFactory.newEngine(
+            targetPackage = config.targetPackage,
+            mockMode = cliOptions.mockMode,
+            configAttrib =  config,
+            logger = ConsoleEngineLogger(),
         )
-
-        val scriptRunner = ScriptRunnerDispatcher()
-
-        val engine = OrcaEngine(
-            config = config,
-            systemInspector = inspector,
-            scriptRunner = scriptRunner,
-            logger = logger
-        )
+        if (engine == null) {
+            println("❌ Failed to create Orca Engine")
+            return
+        }
 
         // Shutdown hook for CTRL+C
         Runtime.getRuntime().addShutdownHook(Thread {
@@ -60,40 +56,6 @@ object RunCommand {
             engine.stop()
         })
 
-        // --------------------------------------------------------------------
-        //  STEP MODE: run one event at a time when --step is provided
-        // --------------------------------------------------------------------
-        if (cliOptions.stepMode) {
-            println()
-            println("▶ Step mode enabled. Press <Enter> to run the next event, or type 'q' to quit.")
-            val reader = System.`in`.bufferedReader()
-
-            while (true) {
-                print("step> ")
-                val line = reader.readLine() ?: break
-                val trimmed = line.trim()
-
-                if (trimmed.equals("q", ignoreCase = true) ||
-                    trimmed.equals("quit", ignoreCase = true) ||
-                    trimmed.equals("exit", ignoreCase = true)
-                ) {
-                    println("Exiting step mode.")
-                    break
-                }
-
-                val success = engine.runOnce()
-                if (!success) {
-                    println("Last event failed (see logs for details).")
-                }
-            }
-
-            engine.printSummary()
-            return
-        }
-
-        // --------------------------------------------------------------------
-        //  NORMAL BEHAVIOR (unchanged)
-        // --------------------------------------------------------------------
         if (config.maxTestDurationSeconds != null) {
             engine.runForDuration(config.maxTestDurationSeconds.toLong())
             engine.saveReplayState()

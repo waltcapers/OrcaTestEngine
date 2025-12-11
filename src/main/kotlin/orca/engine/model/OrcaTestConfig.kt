@@ -54,7 +54,7 @@ package orca.engine.model
  *  - Logcat capture configuration (`logcat`)
  *  - Optional script hook for post-reboot actions (`postRebootScript`)
  *
- * This object is typically loaded from JSON via `StressConfigLoader` and
+ * This object is typically loaded from JSON via `OrcaConfigLoader` and
  * is consumed by `OrcaEngine` at runtime.
  */
 data class OrcaTestConfig(
@@ -153,7 +153,7 @@ data class OrcaTestConfig(
      * When true, internal selection details, cooldown checks, and trigger
      * evaluations are logged via EngineLogger.
      */
-    val debug: Boolean = false,
+    var debug: Boolean = false,
 
     /**
      * Optional debug step triggers

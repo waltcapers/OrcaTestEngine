@@ -45,7 +45,6 @@ import okio.buffer
 import okio.source
 import orca.engine.model.OrcaTestConfig
 import java.io.File
-import orca.engine.config.JsonSchemaValidator
 
 /**
  * Loads a validated OrcaTestConfig from disk.
@@ -59,7 +58,7 @@ import orca.engine.config.JsonSchemaValidator
  *  PHASE 2 — Moshi object parsing:
  *      - Converts validated JSON into strongly typed Kotlin objects
  */
-object StressConfigLoader {
+object OrcaConfigLoader {
 
     /** Moshi instance for Kotlin data-class parsing */
     private val moshi = Moshi.Builder()

@@ -60,43 +60,64 @@ package orca.engine.core
  *  logger.warn("Slow operation detected")
  *  logger.error("Script failed", exception)
  */
+
+import orca.engine.model.StressEvent
+
 interface EngineLogger {
 
-    /**
-     * Logs an informational message.
-     *
-     * Use this method for:
-     *  - Normal runtime flow messages
-     *  - Script execution output (stdout)
-     *  - Status updates or progress tracking
-     *
-     * @param message The message to log.
-     */
     fun info(message: String)
-
-    /**
-     * Logs a warning message indicating a non-critical issue.
-     *
-     * Use this method for:
-     *  - Non-fatal script failures
-     *  - Slow event detection
-     *  - Deprecated or unexpected behavior that does not stop execution
-     *
-     * @param message The message describing the warning condition.
-     */
     fun warn(message: String)
-
-    /**
-     * Logs an error message with an optional exception.
-     *
-     * Use this method for:
-     *  - Critical failures
-     *  - Unexpected exceptions
-     *  - Script errors that require attention
-     *
-     * @param message A description of the error.
-     * @param t Optional throwable representing the underlying cause.
-     */
     fun error(message: String, t: Throwable? = null)
     fun debug(message: String)
+
+    /** Narrative text for users (pretty output). */
+    fun narrative(message: String) {
+        info(message)
+    }
+
+    /** Event summary without state (fallback). */
+    fun event(event: StressEvent) {
+        info(formatEvent(event, emptyMap()))
+    }
+
+    /** Event summary with full state snapshot. */
+    fun event(event: StressEvent, state: Map<String, Any?>) {
+        info(formatEvent(event, state))
+    }
+
+    /** Formats an event and (optionally) the current state. */
+    fun formatEvent(event: StressEvent, state: Map<String, Any?> = emptyMap()): String {
+        val b = StringBuilder()
+        b.appendLine("──────────────── EVENT ─────────────────")
+        b.appendLine("id:          ${event.id}")
+        b.appendLine("type:        ${event.type}")
+        b.appendLine("mode:        ${event.mode}")
+
+        if (!event.description.isNullOrBlank())
+            b.appendLine("description: ${event.description}")
+
+        if (!event.tags.isNullOrEmpty())
+            b.appendLine("tags:        ${event.tags.joinToString()}")
+
+        if (!event.requireState.isNullOrEmpty())
+            b.appendLine("requireState: ${event.requireState}")
+
+        if (!event.setState.isNullOrEmpty())
+            b.appendLine("setState:     ${event.setState}")
+
+        if (!event.clearState.isNullOrEmpty())
+            b.appendLine("clearState:   ${event.clearState}")
+
+        if (state.isNotEmpty()) {
+            b.appendLine()
+            b.appendLine("Current Engine State:")
+            state.forEach { (k, v) ->
+                b.appendLine("  - $k = $v")
+            }
+        }
+
+        b.appendLine("────────────────────────────────────────")
+        return b.toString()
+    }
 }
+

@@ -82,7 +82,7 @@ object JsonSchemaValidator {
     /**
      * ------------------------------------------------------------
      * VALIDATE FROM FILE
-     * This is used by StressConfigLoader.load(path)
+     * This is used by OrcaConfigLoader.load(path)
      * ------------------------------------------------------------
      */
     fun validateConfig(configFile: File): Set<ValidationMessage> {
@@ -91,10 +91,22 @@ object JsonSchemaValidator {
         }
 
         val schema = loadSchema()
-        val configNode: JsonNode = mapper.readTree(configFile)
+        val node = mapper.readTree(configFile)
 
-        return schema.validate(configNode)
+        val results = schema.validate(node)
+
+        // Print diagnostics with general guidance
+        results.forEach { vm ->
+            println(
+                "❌ Schema violation at ${vm.path}: ${vm.message}\n" +
+                        "   Check the value type, spelling, and structure in your JSON."
+            )
+        }
+
+        return results
     }
+
+
 
     /**
      * ------------------------------------------------------------

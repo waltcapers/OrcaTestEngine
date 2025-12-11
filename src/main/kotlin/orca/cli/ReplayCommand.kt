@@ -39,8 +39,9 @@
 
 package orca.cli
 
-import orca.engine.config.StressConfigLoader
+import orca.engine.config.OrcaConfigLoader
 import orca.engine.core.OrcaEngine
+import orca.engine.core.OrcaEngineFactory
 import orca.engine.logging.ConsoleEngineLogger
 import orca.engine.system.DefaultSystemInspector
 import java.io.File
@@ -62,43 +63,42 @@ import java.io.File
  */
 object ReplayCommand {
 
-    private const val DEFAULT_CONFIG = "orca-config.json"
     private const val DEFAULT_REPLAY_STATE = "replay_state.json"
 
-    fun run() {
-        val configFile = File(DEFAULT_CONFIG)
+    fun run(configPath: String, cliOptions: GlobalCliOptions,
+            replayState: String = DEFAULT_REPLAY_STATE) {
+        val configFile = File(configPath)
+        val replayFilePath = "${configFile.parentFile.absolutePath}${File.separator}$DEFAULT_REPLAY_STATE"
         if (!configFile.exists()) {
-            println("❌ Default config file not found: ${configFile.absolutePath}")
-            println("   Usage: orca replay (expects $DEFAULT_CONFIG and $DEFAULT_REPLAY_STATE in the current directory)")
-            return
+            println("❌ Config file not found: ${configFile.absolutePath}")
+            println("   Usage: orca replay (expects $configPath and $replayFilePath in the same directory")
         }
 
-        val replayStateFile = File(DEFAULT_REPLAY_STATE)
+        val replayStateFile = File(replayFilePath)
         if (!replayStateFile.exists()) {
             println("❌ Replay state file not found: ${replayStateFile.absolutePath}")
             println("   Run a failing test first so OrcaEngine can write replay_state.json.")
             return
         }
 
-        val logger = ConsoleEngineLogger()
-
         val config = try {
-            StressConfigLoader.load(DEFAULT_CONFIG)
+            OrcaConfigLoader.load(configPath)
         } catch (ex: Exception) {
             println("❌ Failed to load config: ${ex.message}")
             ex.printStackTrace()
             return
         }
 
-        val inspector = DefaultSystemInspector(debug = false, logger)
-        val scriptRunner = orca.engine.core.ScriptRunnerDispatcher()
-
-        val engine = OrcaEngine(
-            config = config,
-            systemInspector = inspector,
-            scriptRunner = scriptRunner,
-            logger = logger
+        val engine = OrcaEngineFactory.newEngine(
+            targetPackage = config.targetPackage,
+            mockMode = cliOptions.mockMode,
+            configAttrib =  config,
+            logger = ConsoleEngineLogger(),
         )
+        if (engine == null) {
+            println("❌ Failed to create Orca Engine")
+            return
+        }
 
         // Uses OrcaEngine.replay(), which internally reads replay_state.json.
         engine.replay()

@@ -29,7 +29,7 @@ object Banner {
         // Title line
         println(
             Ansi.bold(
-                "OrcaTestEngine  —  Stress Testing Framework for Android",
+                "🐋 OrcaTestEngine  —  Stress Testing Framework for Android",
                 color
             )
         )

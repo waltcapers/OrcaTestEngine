@@ -7,16 +7,18 @@
 
 package orca.engine.core
 
+import MockScriptRunner
+import orca.engine.config.OrcaConfigLoader
 import orca.engine.logging.ConsoleEngineLogger
 import orca.engine.logging.LogcatManager
 import orca.engine.logging.MockLogcatManager
 import orca.engine.model.OrcaTestConfig
 import orca.engine.model.ScriptRunner
+import orca.engine.model.SystemInspector
 import orca.engine.system.AdbSystemInspector
 import orca.engine.system.DefaultAdbExecutor
-import orca.engine.system.DefaultSystemInspector
-import orca.engine.system.MockAdbExecutor
 import orca.engine.system.MockSystemInspector
+import java.io.File
 
 /**
  * Small factory to construct OrcaEngine instances for:
@@ -33,59 +35,131 @@ object OrcaEngineFactory {
     )
 
     /**
-     * Real device engine:
-     *  - AdbSystemInspector + DefaultAdbExecutor
-     *  - DefaultLogcatManager() via OrcaEngine default
+     * Creates and configures a new instance of [OrcaEngine] using either a real
+     * ADB-backed system inspector or a simulated mock environment.
+     *
+     * This function centralizes engine construction to ensure consistent logger
+     * assignment, inspector selection, script-runner selection, and config loading.
+     *
+     * ### Supported `configAttrib` types:
+     * - **String** → treated as a filesystem path to a JSON config file.
+     *   The file is loaded using [OrcaConfigLoader.load].
+     * - **OrcaTestConfig** → used directly, without reloading.
+     *
+     * Any other type will cause an [IllegalArgumentException].
+     *
+     * ### Mock Mode
+     * When `mockMode = true`:
+     * - Uses [MockSystemInspector] (no ADB required)
+     * - Uses [MockScriptRunner] (deterministic behavior)
+     * - Safe for dry-runs, schema testing, and debugging without a device
+     *
+     * When `mockMode = false`:
+     * - Uses [AdbSystemInspector] (real device/emulator)
+     * - Uses [ScriptRunnerDispatcher] to execute actual scripts
+     * - Requires ADB to be installed and accessible via PATH
+     *
+     * ### Parameters:
+     * @param targetPackage The primary Android package to monitor for stability
+     *   (used by inspectors and process checks).
+     *
+     * @param configAttrib Either a file path (String) to a JSON config, or an
+     *   already-constructed [OrcaTestConfig] instance, or a File.
+     *
+     * @param mockMode If true, runs in simulation mode. No ADB commands are used.
+     *   Default is `true` to avoid accidental device interaction.
+     *
+     * @param logger A shared [EngineLogger] instance. Defaults to
+     *   [LoggerProvider.get] if not provided. This ensures consistent logging
+     *   across engine instances.
+     *
+     * @param debug Enables verbose debugging in system inspectors and script
+     *   runners. Does not alter config-level debug flags.
+     *
+     * ### Returns:
+     * A fully initialized [OrcaEngine] ready for execution, or `null` if:
+     * - configuration fails to load
+     * - configAttrib is invalid
+     *
+     * ### Throws:
+     * - None directly. Exceptions are caught and logged.
+     *
+     * ### Usage Example:
+     * ```
+     * val engine = newEngine(
+     *     targetPackage = "com.example.myapp",
+     *     configAttrib = "stress.json",
+     *     mockMode = false,
+     *     logger = LoggerProvider.get(),
+     *     debug = true
+     * ) ?: error("Engine creation failed")
+     *
+     * engine.runLoop()
+     * ```
      */
-    fun createReal(
-        config: OrcaTestConfig,
-        deps: RealEngineDeps = RealEngineDeps(),
-        logger: ConsoleEngineLogger = ConsoleEngineLogger(),
-        scriptRunner: ScriptRunner = ScriptRunnerDispatcher()
-    ): OrcaEngine {
-        val adb = DefaultAdbExecutor(
-            adbPath = deps.adbPath,
-            deviceSerial = deps.deviceSerial,
-            logger = logger
-        )
 
-        val inspector = AdbSystemInspector(
-            adb = adb,
-            defaultPackageName = config.targetPackage,
-            debug = config.debug,
-            logger = logger
-        )
+    fun newEngine(
+        targetPackage: String?,
+        configAttrib: Any,
+        mockMode: Boolean = true,
+        logger: EngineLogger,
+        debug: Boolean = false
+    ): OrcaEngine? {
 
+        // ---------------------------------------------------------------
+        // 1. Resolve config (String → load JSON, or use OrcaTestConfig)
+        // ---------------------------------------------------------------
+        val config: OrcaTestConfig = try {
+            when (configAttrib) {
+                is String -> OrcaConfigLoader.load(configAttrib)
+                is OrcaTestConfig -> configAttrib
+                is File -> OrcaConfigLoader.load(configAttrib.absolutePath)
+                else -> throw IllegalArgumentException("configAttrib must be String or OrcaTestConfig")
+            }
+        } catch (t: Throwable) {
+            logger.error("CONFIG LOAD FAILED: ${t.message}")
+            return null
+        }
+
+        // ---------------------------------------------------------------
+        // 2. System inspector & Script runner selection
+        // ---------------------------------------------------------------
+        val inspector: SystemInspector
+        val runner: ScriptRunner
+
+        if (mockMode) {
+            logger.info("Mock mode enabled (Simulated SystemInspector + MockScriptRunner).")
+
+            inspector = MockSystemInspector(
+                debug = debug,
+            )
+
+            runner = MockScriptRunner()
+
+        } else {
+            logger.info("Running with ADB bindings.")
+
+            inspector = AdbSystemInspector(
+                adb = DefaultAdbExecutor(
+                    adbPath = "adb",
+                    deviceSerial = null,
+                ),
+                defaultPackageName = targetPackage,
+                debug = debug,
+            )
+
+            runner = ScriptRunnerDispatcher()
+        }
+
+        // ---------------------------------------------------------------
+        // 3. Create the engine
+        // ---------------------------------------------------------------
         return OrcaEngine(
             config = config,
             systemInspector = inspector,
-            scriptRunner = scriptRunner,
+            scriptRunner = runner,
             logger = logger
-            // logcat: default DefaultLogcatManager()
         )
     }
 
-    /**
-     * Mock/dry-run engine:
-     *  - MockSystemInspector (no ADB)
-     *  - MockLogcatManager (no logcat)
-     */
-    fun createMock(
-        config: OrcaTestConfig,
-        logger: ConsoleEngineLogger = ConsoleEngineLogger(),
-        scriptRunner: ScriptRunner = ScriptRunnerDispatcher(),
-        logcatManager: LogcatManager = MockLogcatManager()
-    ): OrcaEngine {
-        val inspector = MockSystemInspector(
-            debug = config.debug
-        )
-
-        return OrcaEngine(
-            config = config,
-            systemInspector = inspector,
-            scriptRunner = scriptRunner,
-            logger = logger,
-            logcat = logcatManager
-        )
-    }
 }

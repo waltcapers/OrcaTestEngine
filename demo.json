@@ -1,0 +1,125 @@
+{
+  "name": "Orca Demo – Narrative Warmup/Main/Cleanup",
+  "description": "Small demo config to showcase Orca's narrative mode with warmup, main test, and cleanup using setState / clearState.",
+  "randomSeed": 1234,
+  "runMode": "RANDOM",
+  "defaultSlowThresholdMillis": 2000,
+  "defaultTimeoutSeconds": 5,
+  "events": [
+    {
+      "id": "warmup_sequence",
+      "description": "Run a short warmup sequence before the main test.",
+      "type": "SEQUENCE",
+      "mode": "RANDOM",
+      "enabled": true,
+      "weight": 1,
+      "tags": ["demo", "warmup"],
+      "sequence": ["warmup_step_1", "warmup_step_2"],
+      "postEvents": ["main_test"],
+      "logOutput": true,
+      "logErrors": true
+    },
+
+    {
+      "id": "warmup_step_1",
+      "description": "Warmup step 1 – pretend to prepare the environment.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "enabled": true,
+      "weight": 1,
+      "tags": ["demo", "warmup"],
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[warmup_step_1] Initializing demo environment…'"
+        ]
+      },
+      "setState": {
+        "phase": "WARMUP_DONE"
+      },
+      "logOutput": true,
+      "logErrors": true
+    },
+
+    {
+      "id": "warmup_step_2",
+      "description": "Warmup step 2 – confirm the environment is ready.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "enabled": true,
+      "weight": 1,
+      "tags": ["demo", "warmup"],
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[warmup_step_2] Verifying demo environment readiness…'"
+        ]
+      },
+      "requireState": {
+        "phase": "WARMUP_DONE"
+      },
+      "setState": {
+        "phase": "MAIN_READY"
+      },
+      "logOutput": true,
+      "logErrors": true
+    },
+
+    {
+      "id": "main_test",
+      "description": "Main test event – only runs after warmup has completed.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "enabled": true,
+      "weight": 1,
+      "tags": ["demo", "main"],
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[main_test] Running the primary demo action…'"
+        ]
+      },
+      "requireState": {
+        "phase": "MAIN_READY"
+      },
+      "setState": {
+        "phase": "MAIN_DONE"
+      },
+      "postEvents": ["cleanup"],
+      "logOutput": true,
+      "logErrors": true
+    },
+
+    {
+      "id": "cleanup",
+      "description": "Cleanup event – runs after the main test and clears the phase state.",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "enabled": true,
+      "weight": 1,
+      "tags": ["demo", "cleanup"],
+      "language": "SHELL",
+      "script": {
+        "inline": [
+          "echo '[cleanup] Cleaning up demo state…'"
+        ]
+      },
+      "requireState": {
+        "phase": "MAIN_DONE"
+      },
+      "setState": {
+        "cleanup_status": "DONE"
+      },
+      "clearState": [
+        "phase"
+      ],
+      "logOutput": true,
+      "logErrors": true
+    }
+  ],
+  "targetPackage": null,
+  "debug": false,
+  "logcat": null,
+  "maxTestDurationSeconds": null,
+  "postRebootScript": null
+}

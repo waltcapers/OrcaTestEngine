@@ -1,0 +1,50 @@
+{
+  "randomSeed": 42,
+  "debug": true,
+ "debugBreakBeforeEvent": true,
+  "events": [
+    {
+      "id": "enable_heavy_mode",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "description": "Engages heavy-mode testing.",
+      "script": { "inline": ["echo enable heavy"] },
+
+      "setState": {
+        "mode": "heavy",
+        "stage": "initialized"
+      }
+    },
+
+    {
+      "id": "heavy_action",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "description": "Executes heavy behavior only when mode=heavy.",
+      "requireState": {
+        "mode": "heavy"
+      },
+      "script": { "inline": ["echo heavy action"] },
+
+      "setState": {
+        "stage": "after_heavy_action"
+      }
+    },
+
+    {
+      "id": "reset_mode",
+      "type": "SCRIPT",
+      "mode": "RANDOM",
+      "description": "Resets internal state so heavy-mode will not repeat.",
+      "requireState": {
+        "mode": "heavy"
+      },
+      "script": { "inline": ["echo reset mode"] },
+
+      "clearState": ["mode", "stage"],
+      "setState": {
+        "mode": "normal"
+      }
+    }
+  ]
+}

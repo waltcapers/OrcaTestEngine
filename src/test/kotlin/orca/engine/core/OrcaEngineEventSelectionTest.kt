@@ -46,7 +46,7 @@ class OrcaEngineEventSelectionTest {
             randomSeed = 123L,
             events = events.toList()
         )
-        return OrcaEngine(config, inspector, runner, logger, logcat)
+        return OrcaEngine(config, inspector, runner, logcat, logger)
     }
 
     // ---------------------------------------------------------------------------------------------

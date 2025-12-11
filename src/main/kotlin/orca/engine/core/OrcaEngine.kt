@@ -42,6 +42,7 @@ package orca.engine.core
 import orca.cli.util.Ansi
 import orca.engine.logging.DefaultLogcatManager
 import orca.engine.logging.LogcatManager
+import orca.engine.logging.LoggerProvider
 import orca.engine.model.*
 import orca.engine.util.*
 import kotlin.random.Random
@@ -65,11 +66,14 @@ class OrcaEngine(
     private val config: OrcaTestConfig,
     private val systemInspector: SystemInspector,
     private val scriptRunner: ScriptRunner,
-    private val logger: EngineLogger,
     private val logcat: LogcatManager = DefaultLogcatManager(),
+    private val logger: EngineLogger,
     private val sleepProvider: SleepProvider = DefaultSleepProvider
 ) {
 
+    init {
+        LoggerProvider.set(logger)
+    }
     /** Deterministic RNG seeded from config.randomSeed. */
     private var rng = Random(config.randomSeed)
 
@@ -109,6 +113,9 @@ class OrcaEngine(
 
     /** Flag indicating the engine is running in replay mode. */
     private var replayMode = false
+
+    /** Skip re-running the last event once after a debug breakpoint */
+    private var skipNextRetryForEvent: String? = null
 
     /**
      * Wrapper for RNG access that increments [rngCalls].
@@ -169,6 +176,26 @@ class OrcaEngine(
     }
 
     /**
+     * Exposes a safe read-only copy of the engine's internal state map.
+     * Used by the OrcaShellDebugger.
+     */
+    fun getStateSnapshot(): Map<String, String> {
+        return state.toMap()
+    }
+
+    /**
+     * runs an event by its id
+     */
+    fun runEventById(id: String): Boolean {
+        val event = eventsById[id]
+        if (event == null) {
+            logger.error("runEventById: No event with ID '$id'.")
+            return false
+        }
+        return executeEventWithPolicy(event)
+    }
+
+    /**
      * Executes a single event:
      * - Selects the next event based on weights / mode / cooldown.
      * - Applies policies, retries, and preconditions.
@@ -182,19 +209,10 @@ class OrcaEngine(
             return false
         }
 
-        // -----------------------------------------------------------------
-        // STEP MODE (Option B): break AFTER selecting, BEFORE executing
-        // -----------------------------------------------------------------
-        val breakForThisEvent =
-            debugBreakActive || (event.debugBreak == true)
-
-        if (breakForThisEvent) {
-            val shouldContinue = promptBeforeEvent(event)
-            if (!shouldContinue) return false
-        }
-
+        // All breakpoint logic is handled inside executeEventWithPolicy().
         return executeEventWithPolicy(event)
     }
+
 
 
     // -------------------------------------------------------------------------
@@ -215,7 +233,7 @@ class OrcaEngine(
     private fun selectNextEvent(profile: String?): StressEvent? {
         val now = System.currentTimeMillis()
 
-        val candidates = config.events.filter { event ->
+        var candidates = config.events.filter { event ->
             if (!event.enabled) return@filter false
             val stats = eventStats[event.id]
 
@@ -227,7 +245,7 @@ class OrcaEngine(
                 return@filter false
             }
 
-            // Respect cooldown (based on timestamp, not duration)
+            // Respect cooldown
             if (event.cooldownSeconds != null && stats?.lastExecutionTimeMillis != null) {
                 val elapsedSec = (now - stats.lastExecutionTimeMillis!!) / 1000
                 if (elapsedSec < event.cooldownSeconds) return@filter false
@@ -239,6 +257,16 @@ class OrcaEngine(
 
         if (candidates.isEmpty()) return null
 
+        // --------------------------------------------------------
+        // ⭐ NEW: Skip the LAST event if we stepped past a failure
+        // --------------------------------------------------------
+        if (skipNextRetryForEvent != null) {
+            val lastEventId = skipNextRetryForEvent!!
+            candidates = candidates.filter { it.id != lastEventId }
+            debug("Step-mode: Excluding $lastEventId from next selection cycle.")
+            skipNextRetryForEvent = null    // consume the skip
+        }
+
         debug("Candidate events after filtering: ${candidates.map { it.id }}")
 
         val weighted = candidates.flatMap { event ->
@@ -249,10 +277,13 @@ class OrcaEngine(
         }
 
         if (weighted.isEmpty()) return null
+
         val selected = weighted[nextRandomInt(weighted.size)]
         debug("Selected event: ${selected.id}")
+        LoggerProvider.get().event(selected,getStateSnapshot())
         return selected
     }
+
 
     /**
      * Clears all engine runtime state used for replay or for a fresh run.
@@ -275,14 +306,27 @@ class OrcaEngine(
     /**
      * Executes an event respecting retry policy and onFailure behavior.
      *
-     * @return true if the event succeeded within its retry policy.
+     * Breakpoint semantics:
+     *  - config.debugBreakBeforeEvent == true OR event.debugBreak == true
+     *        → pause before first attempt.
+     *  - config.debugBreakWhenPreconditionsFail == true
+     *        → pause when preconditions/requireState fail.
+     *  - config.debugBreakOnRetry == true
+     *        → pause before each retry attempt.
+     *  - config.debugBreakOnError == true
+     *        → pause inside executeSingleAttempt() when an attempt fails.
+     *
+     * State semantics:
+     *  - setState is applied in markSuccess()
+     *  - clearState is applied here after the event ultimately succeeds.
      */
     private fun executeEventWithPolicy(event: StressEvent): Boolean {
+
         // -----------------------------------------------------------------
         // Global + per-event "break before execute"
         // -----------------------------------------------------------------
         if (config.debugBreakBeforeEvent == true || event.debugBreak == true) {
-            debugBreakpoint("Before executing event", event)
+            debugBreakpoint("Before executing event ${event.id}", event)
             if (!running) return false
         }
 
@@ -316,24 +360,31 @@ class OrcaEngine(
         // -----------------------------------------------------------------
         val retry = event.retryPolicy ?: config.defaultRetry ?: RetryPolicy(maxAttempts = 1)
         var attempt = 0
+        var success = false
 
         while (attempt < retry.maxAttempts && running) {
             attempt++
-            val success = executeSingleAttempt(event)
 
-            if (success) {
-                return true
+            val thisAttemptSuccess = executeSingleAttempt(event)
+            success = thisAttemptSuccess
+
+            if (thisAttemptSuccess) {
+                // success: break out of retry loop
+                break
             }
 
-            if (event.onFailure != FailurePolicy.RETRY) break
+            // No retry configured → bail
+            if (event.onFailure != FailurePolicy.RETRY) {
+                break
+            }
 
+            // If we still have attempts left, handle backoff + optional breakpoint
             if (attempt < retry.maxAttempts) {
                 val delaySec = when (retry.strategy) {
                     RetryStrategy.LINEAR -> retry.backoffSeconds
                     RetryStrategy.EXPONENTIAL -> retry.backoffSeconds * (1 shl (attempt - 1))
                 }
 
-                // Optional breakpoint whenever we go into a retry
                 if (config.debugBreakOnRetry == true) {
                     debugBreakpoint(
                         "Retrying ${event.id} (attempt $attempt/${retry.maxAttempts})",
@@ -343,11 +394,41 @@ class OrcaEngine(
                 }
 
                 if (delaySec > 0) {
-                    logger.info("Retrying ${event.id} in $delaySec seconds (attempt $attempt/${retry.maxAttempts})")
+                    logger.info(
+                        "Retrying ${event.id} in $delaySec seconds " +
+                                "(attempt $attempt/${retry.maxAttempts})"
+                    )
                     sleepProvider.sleep(delaySec * 1000L)
                 }
             }
         }
+
+        // -----------------------------------------------------------------
+        // If we ultimately succeeded:
+        //  - clearState (if any)
+        //  - optional "after event" breakpoint
+        // -----------------------------------------------------------------
+        if (success) {
+            // Apply clearState BEFORE we proceed to next event.
+            // setState is applied in markSuccess(), which is called from executeSingleAttempt().
+            if (event.clearState.isNotEmpty()) {
+                for (key in event.clearState) {
+                    state.remove(key)
+                    debug("State cleared: $key")
+                }
+            }
+
+            if (config.debugBreakAfterEvent == true) {
+                debugBreakpoint("After executing event ${event.id}", event)
+                if (!running) return false
+            }
+
+            return true
+        }
+
+        // -----------------------------------------------------------------
+        // Failure handling (after exhausting attempts or not retrying)
+        // -----------------------------------------------------------------
 
         when (event.onFailure) {
             FailurePolicy.STOP_TEST -> {
@@ -358,24 +439,24 @@ class OrcaEngine(
                 logger.warn("Disabling event ${event.id} after failure.")
                 eventStats.getOrPut(event.id) { EventStats() }.disabled = true
             }
-            FailurePolicy.LOG_ONLY, FailurePolicy.RETRY -> {
-                // Nothing extra
-            }
-            null -> {
-                // no-op
+            FailurePolicy.LOG_ONLY,
+            FailurePolicy.RETRY -> {
+                // No extra action here
             }
         }
 
-        // ⭐ NEW: stopOnFailure support
+        // stopOnFailure kills the run immediately
         if (event.stopOnFailure) {
             logger.error("stopOnFailure=true → stopping engine immediately due to failure of ${event.id}.")
-            saveReplayState()        // capture deterministic state for debugging
-            stop()                   // sets running = false
-            return false             // bubble failure upward
+            LoggerProvider.get().event(event,getStateSnapshot())
+            saveReplayState()
+            stop()
+            return false
         }
 
         return false
     }
+
 
 
 
@@ -1316,7 +1397,7 @@ class OrcaEngine(
             print("debug> ")
             val line = debugReader.readLine() ?: return
             when (line.trim().lowercase()) {
-                "" -> return
+                "" -> return                   // continue execution
                 "i", "info" -> {
                     println("\n--- Event definition ---")
                     println(event)
@@ -1335,5 +1416,6 @@ class OrcaEngine(
             }
         }
     }
+
 
 }

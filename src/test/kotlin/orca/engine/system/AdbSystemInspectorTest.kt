@@ -72,7 +72,6 @@ class AdbSystemInspectorTest {
             adb = fake,
             defaultPackageName = "com.example.test",
             debug = false,
-            logger = logger
         )
     }
 

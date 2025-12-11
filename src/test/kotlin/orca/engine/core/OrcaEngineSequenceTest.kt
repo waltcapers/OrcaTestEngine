@@ -45,7 +45,7 @@ class OrcaEngineSequenceTest {
             events = events.toList(),
             debug = true
         )
-        return OrcaEngine(cfg, inspector, runner, logger, logcat)
+        return OrcaEngine(cfg, inspector, runner, logcat, logger)
     }
 
     // ------------------------------------------------------------------------------------------------------------------

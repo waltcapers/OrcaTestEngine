@@ -40,6 +40,7 @@
 package orca.engine.logging
 
 import orca.engine.core.EngineLogger
+import orca.engine.model.StressEvent
 
 /**
  * Simple stdout-based implementation of [EngineLogger].
@@ -59,42 +60,45 @@ import orca.engine.core.EngineLogger
  * logging, another implementation (e.g., file-based or JSON-based) may be
  * provided by the user.
  */
-class ConsoleEngineLogger : EngineLogger {
 
-    /**
-     * Prints an informational message to stdout.
-     *
-     * @param message the message to log.
-     */
+
+class ConsoleEngineLogger(
+    private val debugEnabled: Boolean = true,
+    private val narrativeMode: Boolean = false
+) : EngineLogger {
+
     override fun info(message: String) {
-        println("[INFO] $message")
+        if (narrativeMode) println(message)
+        else println("[INFO] $message")
     }
 
-    /**
-     * Prints a warning message to stdout.
-     *
-     * @param message the message to log.
-     */
-    override fun warn(message: String) {
-        println("[WARN] $message")
-    }
+    override fun warn(message: String) = println("[WARN] $message")
+    override fun error(message: String, t: Throwable?) =
+        println("[ERROR] $message" + (t?.let { "\n${it.stackTraceToString()}" } ?: ""))
 
-    /**
-     * Prints an error message to stdout. If a [Throwable] is provided,
-     * its stack trace is converted to a string and appended.
-     *
-     * @param message the error message to log.
-     * @param t optional exception associated with the error.
-     */
-    override fun error(message: String, t: Throwable?) {
-        if (t != null) {
-            println("[ERROR] $message\n${t.stackTraceToString()}")
-        } else {
-            println("[ERROR] $message")
+    override fun debug(message: String) {
+        if (debugEnabled && !narrativeMode) {
+            println("[DEBUG] $message")
         }
     }
 
-    override fun debug(message: String) {
-        println("[DEBUG] $message")
+    /** Narrative text */
+    override fun narrative(message: String) {
+        if (narrativeMode) println(message)
+        else println("[INFO] $message")
+    }
+
+    /** Pretty-print event without state */
+    override fun event(event: StressEvent) {
+        val text = formatEvent(event, emptyMap())
+        if (narrativeMode) println(text)
+        else println("[INFO]\n$text")
+    }
+
+    /** Pretty-print event with state */
+    override fun event(event: StressEvent, state: Map<String, Any?>) {
+        val text = formatEvent(event, state)
+        if (narrativeMode) println(text)
+        else println("[INFO]\n$text")
     }
 }

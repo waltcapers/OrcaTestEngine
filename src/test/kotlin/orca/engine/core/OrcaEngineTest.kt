@@ -38,7 +38,6 @@
  */
 
 package orca.engine.core
-
 import orca.engine.logging.LogcatManager
 import orca.engine.model.*
 import org.junit.jupiter.api.Assertions.*
@@ -93,6 +92,7 @@ class OrcaEngineTest {
     // -------------------------------------------------------------------------
     // 1. BASIC SINGLE-EVENT EXECUTION
     // -------------------------------------------------------------------------
+
 
     /**
      * Verifies that a single RANDOM + SCRIPT event is executed by runOnce()
@@ -704,7 +704,7 @@ class OrcaEngineTest {
             ScriptResult(exitCode = 1, stdout = "", stderr = "err", metrics = emptyMap())
         }
 
-        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logcatManager, logger)
 
         engine.runForIterations(10)
 
@@ -737,7 +737,7 @@ class OrcaEngineTest {
             logcat = LogcatConfig(enabled = true, tag = "TAG")
         )
 
-        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logcatManager, logger)
 
         engine.runForDuration(maxSeconds = 0)   // effectively a quick single-loop
 
@@ -772,7 +772,7 @@ class OrcaEngineTest {
             events = listOf(event)
         )
 
-        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logcatManager, logger)
 
         // Create fake replay state on disk
         ReplayStateSerializer.saveReplayState(
@@ -828,7 +828,7 @@ class OrcaEngineTest {
             mapOf("cpu.totalPercent" to 20.0)
         )
 
-        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logcatManager, logger)
 
         val success = engine.runOnce()
         assertTrue(success)
@@ -862,7 +862,7 @@ class OrcaEngineTest {
             ScriptResult(exitCode = 1, stdout = "", stderr = "boom", metrics = emptyMap())
         }
 
-        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logcatManager, logger)
 
         engine.runOnce()
 
@@ -891,7 +891,7 @@ class OrcaEngineTest {
 
         val config = OrcaTestConfig(randomSeed = 12L, events = listOf(event))
 
-        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logcatManager, logger)
 
         val ok = engine.runOnce()
         assertFalse(ok)
@@ -938,7 +938,7 @@ class OrcaEngineTest {
             )
         }
 
-        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logcatManager, logger)
 
         engine.runOnce()
 
@@ -975,7 +975,7 @@ class OrcaEngineTest {
             ScriptResult(exitCode = 0, stdout = "", stderr = "", metrics = emptyMap())
         }
 
-        val engine = OrcaEngine(config, systemInspector, scriptRunner, logger, logcatManager)
+        val engine = OrcaEngine(config, systemInspector, scriptRunner, logcatManager, logger)
 
         engine.runOnce()
 

@@ -38,6 +38,7 @@
  */
 package orca.cli
 
+import orca.cli.history.HistoryManager
 import orca.cli.util.Ansi
 import orca.cli.util.Banner
 import kotlin.system.exitProcess
@@ -55,7 +56,8 @@ data class GlobalCliOptions(
     val colorEnabled: Boolean = true,
     val artifactsDir: String? = null,
     val helpRequested: Boolean = false,
-    val stepMode: Boolean = false          // NEW: single-step debug mode
+    val stepMode: Boolean = false,          // NEW: single-step debug mode
+    val mockMode: Boolean = false
 )
 
 /**
@@ -133,6 +135,7 @@ object OrcaCLI {
         var artifactsDir: String? = null
         var helpRequested = false
         var stepMode = false   // NEW
+        var mockMode = false
 
         val tokens = args.toMutableList()
 
@@ -203,8 +206,8 @@ object OrcaCLI {
                     continue
                 }
 
-                "--step" -> {   // NEW
-                    stepMode = true
+                "--mock" -> {
+                    mockMode = true
                     i++
                     continue
                 }
@@ -238,7 +241,7 @@ object OrcaCLI {
             colorEnabled = colorEnabled,
             artifactsDir = artifactsRoot,
             helpRequested = helpRequested,
-            stepMode = stepMode          // NEW
+            mockMode = mockMode// NEW
         )
 
         OrcaCliContextHolder.globalOptions = opts
@@ -252,7 +255,7 @@ object OrcaCLI {
     ): GlobalCliOptions {
 
         val isRunLike = when (command) {
-            "run", "dry-run", "profile", "run-event", "replay", "run-mock" -> true
+            "run", "dry-run", "profile", "run-event", "replay" -> true
             else -> false
         }
 
@@ -290,19 +293,14 @@ object OrcaCLI {
                         printError("Missing config file.", opts); printUsage(); 1
                     } else {
                         println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Running ${args[0]}…", opts.colorEnabled))
-                        RunCommand.run(args[0], opts)   // CHANGED
-                        println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} run complete.", opts.colorEnabled))
-                        0
-                    }
-                }
+                        if (opts.mockMode) {
+                            println(Ansi.yellow("MOCK MODE ENABLED — running with DefaultSystemInspector", opts.colorEnabled))
+                            RunMockCommand.run(args[0], opts)    // you already have this
+                        } else {
+                            RunCommand.run(args[0], opts)
+                        }
 
-                "run-mock" -> {
-                    if (args.isEmpty()) {
-                        printError("Missing config file.", opts); printUsage(); 1
-                    } else {
-                        println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Running (mock) ${args[0]}…", opts.colorEnabled))
-                        RunMockCommand.run(args[0], opts)  // NEW COMMAND (expects opts)
-                        println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} mock run complete.", opts.colorEnabled))
+                        println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} run complete.", opts.colorEnabled))
                         0
                     }
                 }
@@ -319,10 +317,24 @@ object OrcaCLI {
                 }
 
                 "replay" -> {
-                    println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Starting deterministic replay…", opts.colorEnabled))
-                    ReplayCommand.run()
-                    println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} Replay finished.", opts.colorEnabled))
-                    0
+                    if (args.isEmpty()) {
+                        printError("Missing config file.", opts); printUsage(); 1
+                    } else {
+                        println(
+                            Ansi.blue(
+                                "${Ansi.infoSymbol(opts.colorEnabled)} Starting deterministic replay…",
+                                opts.colorEnabled
+                            )
+                        )
+                        ReplayCommand.run(args[0],opts)
+                        println(
+                            Ansi.green(
+                                "${Ansi.successSymbol(opts.colorEnabled)} Replay finished.",
+                                opts.colorEnabled
+                            )
+                        )
+                        0
+                    }
                 }
 
                 "dry-run" -> {
@@ -334,6 +346,11 @@ object OrcaCLI {
                         println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} Dry-run complete.", opts.colorEnabled))
                         0
                     }
+                }
+
+                "debug-shell" -> {
+                    OrcaShellDebugger().start()
+                    0
                 }
 
                 "list-events" -> {
@@ -367,7 +384,7 @@ object OrcaCLI {
                     }
                     val iters = args.getOrNull(2)?.toIntOrNull() ?: 1
                     println(Ansi.blue("${Ansi.infoSymbol(opts.colorEnabled)} Running '${args[1]}' $iters times…", opts.colorEnabled))
-                    RunEventCommand.run(args[0], args[1], iters)
+                    RunEventCommand.run(args[0], args[1], iters, opts)
                     println(Ansi.green("${Ansi.successSymbol(opts.colorEnabled)} run-event complete.", opts.colorEnabled))
                     0
                 }
@@ -420,11 +437,12 @@ object OrcaCLI {
     }
 
     // ======================================================================================
-    //  INTERACTIVE SHELL  (unchanged, but now benefits from --step too)
+    //  INTERACTIVE SHELL
     // ======================================================================================
 
     private object InteractiveShell {
 
+        private val historyManager = HistoryManager()
         fun run(sessionOpts: GlobalCliOptions) {
             println(
                 Ansi.cyan(
@@ -438,7 +456,7 @@ object OrcaCLI {
             while (true) {
                 print(Ansi.green("orca${Ansi.promptSymbol(sessionOpts.colorEnabled)} ", sessionOpts.colorEnabled))
                 val line = reader.readLine() ?: break
-                val trimmed = line.trim()
+                var trimmed = line.trim()
                 if (trimmed.isEmpty()) continue
 
                 if (trimmed.equals("exit", true) || trimmed.equals("quit", true)) break
@@ -448,6 +466,17 @@ object OrcaCLI {
                     continue
                 }
 
+                if(trimmed == "history") {
+                    historyManager.print()
+                    continue
+                }
+
+                // HISTORY SHORTCUTS (!!, !n)
+                val expanded = historyManager.resolve(trimmed)
+                if (expanded == null) continue  // invalid or error already printed
+
+                trimmed = expanded
+                historyManager.add(trimmed)
                 val tokens = tokenize(trimmed)
                 try {
                     val parsed = parseArgs(tokens.toTypedArray())
@@ -505,15 +534,15 @@ object OrcaCLI {
         println("  --artifacts-dir <path> Artifact output root directory")
         println("  --debug                Verbose logging")
         println("  --no-color             Disable ANSI output")
-        println("  --step                 Single-step mode (run one event at a time)")
+        println("  --mock                 Run with DefaultSystemInspector (no ADB)")
         println("  --help, -h             Show help\n")
 
         println(Ansi.blue("Commands:", opts.colorEnabled))
         println("  run <cfg>              Execute full stress test (ADB)")
-        println("  run-mock <cfg>         Execute using mock inspector (no ADB)")
         println("  validate <cfg>         Validate config schema")
         println("  replay                 Replay last failure deterministically")
         println("  dry-run <cfg>          Print events without running")
+        println("  debug-shell            Start the interactive Orca debugger")
         println("  list-events <cfg>      List event definitions")
         println("  explain-event <c> <id> Explain a single event")
         println("  detect-adb             Check adb/device availability")
@@ -526,10 +555,9 @@ object OrcaCLI {
 
         println(Ansi.gray("Examples:", opts.colorEnabled))
         println("  orca run config.json --device emulator-5554")
-        println("  orca --step run config.json")
-        println("  orca --step run-mock mock-config.json")
         println("  orca validate config.json")
         println("  orca run config.json --timeout-ms 30000")
+        println("  orca interactive")
         println()
     }
 

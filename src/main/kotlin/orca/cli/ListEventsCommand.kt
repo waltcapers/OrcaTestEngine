@@ -39,7 +39,7 @@
 
 package orca.cli
 
-import orca.engine.config.StressConfigLoader
+import orca.engine.config.OrcaConfigLoader
 import java.io.File
 
 /**
@@ -64,7 +64,7 @@ object ListEventsCommand {
         }
 
         val config = try {
-            StressConfigLoader.load(configPath)
+            OrcaConfigLoader.load(configPath)
         } catch (ex: Exception) {
             println("❌ Failed to load config: ${ex.message}")
             ex.printStackTrace()

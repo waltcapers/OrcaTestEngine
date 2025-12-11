@@ -38,7 +38,7 @@
  */
 
 import orca.cli.OrcaCLI
-import orca.engine.config.StressConfigLoader
+import orca.engine.config.OrcaConfigLoader
 import orca.engine.core.ScriptRunnerDispatcher
 import orca.engine.core.OrcaEngine
 import orca.engine.logging.ConsoleEngineLogger
@@ -56,7 +56,7 @@ fun mainTest() {
     val useAdb = false
 
     val config = try {
-        StressConfigLoader.load("orca-config.json")
+        OrcaConfigLoader.load("orca-config.json")
     } catch (t: Throwable) {
         println("\n❌ CONFIG VALIDATION FAILED\n${t.message}")
         return
@@ -66,15 +66,13 @@ fun mainTest() {
         AdbSystemInspector(
             adb = DefaultAdbExecutor(
                 adbPath = "adb",
-                deviceSerial = null,
-                logger = logger
+                deviceSerial = null
             ),
             defaultPackageName = config.targetPackage,
-            debug = false,
-            logger = logger
+            debug = false
         )
     } else {
-        DefaultSystemInspector( debug = true, logger)
+        DefaultSystemInspector( debug = true)
     }
 
     val scriptRunner = ScriptRunnerDispatcher()

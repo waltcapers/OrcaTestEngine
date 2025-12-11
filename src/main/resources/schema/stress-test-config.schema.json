@@ -61,10 +61,6 @@
       "default": false,
       "description": "When true, OrcaEngine emits additional debug logging about selection, cooldowns, and triggers."
     },
-    "debugBreakBeforeEvent": {
-      "type": ["boolean", "null"],
-      "description": "If true, Orca pauses before executing each event and prompts on the console."
-    },
     "debugBreakAfterEvent": {
       "type": ["boolean", "null"],
       "description": "If true, Orca pauses after each event completes and prompts on the console."
@@ -293,6 +289,13 @@
           "type": "object",
           "description": "State key/value pairs applied after a successful event execution.",
           "additionalProperties": { "type": "string" }
+        },
+
+        "clearState": {
+          "type": "array",
+          "description": "List of state keys to remove from the engine state immediately after this event succeeds.",
+          "items": { "type": "string" },
+          "uniqueItems": true
         },
 
         "onFailure": {

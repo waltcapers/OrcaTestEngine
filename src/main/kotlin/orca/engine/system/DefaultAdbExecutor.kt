@@ -41,6 +41,7 @@ package orca.engine.system
 
 import orca.engine.core.ProcessUtils
 import orca.engine.core.EngineLogger
+import orca.engine.logging.LoggerProvider
 
 /**
  * Real implementation of [AdbExecutor] that executes actual adb commands.
@@ -52,7 +53,6 @@ import orca.engine.core.EngineLogger
 class DefaultAdbExecutor(
     private val adbPath: String = "adb",
     private val deviceSerial: String? = null,
-    private val logger: EngineLogger? = null
 ) : AdbExecutor {
 
     /**
@@ -73,7 +73,7 @@ class DefaultAdbExecutor(
      */
     override fun exec(args: List<String>, timeoutSeconds: Long): AdbResult {
         val cmd = base() + args
-        logger?.info("[ADB] exec: ${cmd.joinToString(" ")}")
+        LoggerProvider.get().info("[ADB] exec: ${cmd.joinToString(" ")}")
 
         val result = ProcessUtils.runProcess(
             command = cmd,
@@ -97,7 +97,7 @@ class DefaultAdbExecutor(
      */
     override fun shell(command: String, timeoutSeconds: Long): AdbResult {
         val cmd = base() + listOf("shell") + command.split(" ")
-        logger?.info("[ADB] shell: ${cmd.joinToString(" ")}")
+        LoggerProvider.get().info("[ADB] shell: ${cmd.joinToString(" ")}")
 
         val result = ProcessUtils.runProcess(
             command = cmd,

@@ -39,9 +39,9 @@
 
 package orca.cli
 
-import orca.engine.config.StressConfigLoader
-import orca.engine.core.EngineLogger
+import orca.engine.config.OrcaConfigLoader
 import orca.engine.core.OrcaEngine
+import orca.engine.core.OrcaEngineFactory
 import orca.engine.core.ScriptRunnerDispatcher
 import orca.engine.logging.ConsoleEngineLogger
 import orca.engine.system.DefaultSystemInspector
@@ -72,6 +72,7 @@ import java.io.File
 object ProfileCommand {
 
     fun run(configPath: String, iterations: Int) {
+
         val file = File(configPath)
         if (!file.exists()) {
             println("❌ Config file not found: ${file.absolutePath}")
@@ -79,26 +80,24 @@ object ProfileCommand {
         }
 
         val config = try {
-            StressConfigLoader.load(configPath)
+            OrcaConfigLoader.load(configPath)
         } catch (ex: Exception) {
             println("❌ Failed to load config: ${ex.message}")
             ex.printStackTrace()
             return
         }
-
-        val logger = ConsoleEngineLogger()
-        val inspector = DefaultSystemInspector(debug = false, logger)
-        val scriptRunner = ScriptRunnerDispatcher()
-
-        val engine = OrcaEngine(
-            config = config,
-            systemInspector = inspector,
-            scriptRunner = scriptRunner,
-            logger = logger
+        val engine = OrcaEngineFactory.newEngine(
+            targetPackage = config.targetPackage,
+            config,
+            logger = ConsoleEngineLogger(),
         )
+        if(engine == null) {
+            println("❌ Failed to create Orca Engine")
+            return
+        }
 
         println("Profiling selection behavior for $iterations iteration(s)...")
-        engine.runForIterations(iterations.toLong())
+        engine?.runForIterations(iterations.toLong())
         // OrcaEngine.runForIterations() already calls printSummary() at the end.
     }
 }

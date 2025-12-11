@@ -40,6 +40,7 @@
 package orca.engine.system
 
 import orca.engine.core.EngineLogger
+import orca.engine.logging.LoggerProvider
 import orca.engine.model.SystemInspector
 import orca.engine.model.MetricsConfig
 
@@ -79,7 +80,6 @@ class AdbSystemInspector(
      * restricted builds.
      */
     private val debug: Boolean = false,
-    private val logger: EngineLogger
 ) : SystemInspector {
 
     // ---------------------------------------------------------------------
@@ -88,7 +88,7 @@ class AdbSystemInspector(
 
     private fun dbg(msg: String) {
         if (debug) {
-            logger.debug("[AdbSystemInspector] $msg")
+            LoggerProvider.get().debug("[AdbSystemInspector] $msg")
         }
     }
 

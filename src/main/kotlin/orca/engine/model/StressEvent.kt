@@ -200,6 +200,12 @@ data class StressEvent(
      */
     val setState: Map<String, String> = emptyMap(),
 
+    /**
+     * Optional list of state keys to remove from engine state after
+     * successful execution of this event.
+     */
+    val clearState: List<String> = emptyList(),
+
     // -------------------------------------------------------------------------
     // Flow control & conditional logic
     // -------------------------------------------------------------------------
