@@ -78,7 +78,7 @@
 
     {
       "id": "simulated_failure",
-      "description": "Demonstrates retry behavior",
+      "description": "Demonstrates retry behavior FAIL",
       "type": "SCRIPT",
       "mode": "RANDOM",
       "weight": 2,

@@ -1,12 +1,12 @@
 {
   "randomSeed": 42,
   "debug": true,
- "debugBreakBeforeEvent": true,
   "events": [
     {
       "id": "enable_heavy_mode",
       "type": "SCRIPT",
       "mode": "RANDOM",
+      "language": "SHELL",
       "description": "Engages heavy-mode testing.",
       "script": { "inline": ["echo enable heavy"] },
 
@@ -20,6 +20,7 @@
       "id": "heavy_action",
       "type": "SCRIPT",
       "mode": "RANDOM",
+      "language": "SHELL",
       "description": "Executes heavy behavior only when mode=heavy.",
       "requireState": {
         "mode": "heavy"
@@ -36,6 +37,7 @@
       "type": "SCRIPT",
       "mode": "RANDOM",
       "description": "Resets internal state so heavy-mode will not repeat.",
+      "language": "SHELL",
       "requireState": {
         "mode": "heavy"
       },

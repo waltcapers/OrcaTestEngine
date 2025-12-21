@@ -74,6 +74,9 @@ object RunMockCommand {
             return
         }
 
+        if( cliOptions.seedOverride != null){
+            config.randomSeed = cliOptions.seedOverride
+        }
         val engine = OrcaEngineFactory.newEngine(
             targetPackage = config.targetPackage,
             mockMode = true,

@@ -967,6 +967,7 @@ class OrcaEngine(
      * when the loop exits.
      */
     fun runLoop(delayMs: Long = 500, profile: String? = null) {
+        resetReplayState()
         running = true
 
         val logcatEnabled = config.logcat?.enabled != false
@@ -1016,7 +1017,7 @@ class OrcaEngine(
      */
     fun runForDuration(maxSeconds: Long, profile: String? = null) {
         val stopTime = System.currentTimeMillis() + maxSeconds * 1000L
-
+        resetReplayState()
         val logcatEnabled = config.logcat?.enabled != false
         val tagOrPackage = config.logcat?.tag ?: config.targetPackage
 

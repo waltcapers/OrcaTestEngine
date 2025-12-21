@@ -130,7 +130,7 @@ object OrcaCLI {
         var seedOverride: Long? = null
         var logFile: String? = null
         var timeoutMs: Long? = null
-        var debug = false
+        var verbose = false
         var colorEnabled = true
         var artifactsDir: String? = null
         var helpRequested = false
@@ -194,8 +194,8 @@ object OrcaCLI {
                     continue
                 }
 
-                "--debug" -> {
-                    debug = true
+                "--verbose" -> {
+                    verbose = true
                     i++
                     continue
                 }
@@ -236,7 +236,7 @@ object OrcaCLI {
             deviceId = deviceId,
             seedOverride = seedOverride,
             logFile = logFile,
-            debug = debug,
+            debug = verbose,
             timeoutMs = timeoutMs,
             colorEnabled = colorEnabled,
             artifactsDir = artifactsRoot,
@@ -348,7 +348,7 @@ object OrcaCLI {
                     }
                 }
 
-                "debug-shell" -> {
+                "dbg" -> {
                     OrcaShellDebugger().start()
                     0
                 }
@@ -471,6 +471,18 @@ object OrcaCLI {
                     continue
                 }
 
+                if (trimmed == "history clear") {
+                    print("Clear Orca command history? (y/N): ")
+                    val confirm = reader.readLine()?.trim()?.lowercase()
+                    if (confirm == "y") {
+                        historyManager.clear()
+                        println("[ORCA] Command history cleared.")
+                    } else {
+                        println("[ORCA] History clear cancelled.")
+                    }
+                    continue
+                }
+
                 // HISTORY SHORTCUTS (!!, !n)
                 val expanded = historyManager.resolve(trimmed)
                 if (expanded == null) continue  // invalid or error already printed
@@ -532,7 +544,7 @@ object OrcaCLI {
         println("  --log-file <path>      Output logs here")
         println("  --timeout-ms <num>     Optional max time")
         println("  --artifacts-dir <path> Artifact output root directory")
-        println("  --debug                Verbose logging")
+        println("  --verbose              Verbose logging")
         println("  --no-color             Disable ANSI output")
         println("  --mock                 Run with DefaultSystemInspector (no ADB)")
         println("  --help, -h             Show help\n")
@@ -542,7 +554,7 @@ object OrcaCLI {
         println("  validate <cfg>         Validate config schema")
         println("  replay                 Replay last failure deterministically")
         println("  dry-run <cfg>          Print events without running")
-        println("  debug-shell            Start the interactive Orca debugger")
+        println("  dbg                    Start the interactive Orca debugger")
         println("  list-events <cfg>      List event definitions")
         println("  explain-event <c> <id> Explain a single event")
         println("  detect-adb             Check adb/device availability")

@@ -39,7 +39,7 @@
         "backoffSeconds": 1,
         "strategy": "LINEAR"
       },
-      "onFailure": "LOG_ONLY"
+      "onFailure": "RETRY"
     }
   ]
 }

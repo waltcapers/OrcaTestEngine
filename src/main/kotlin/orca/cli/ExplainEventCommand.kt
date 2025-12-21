@@ -84,7 +84,7 @@ object ExplainEventCommand {
         printDetailed(event)
     }
 
-    private fun printDetailed(event: StressEvent) {
+    fun printDetailed(event: StressEvent) {
         println("=== Event Detail: ${event.id} ===")
         println("Description: ${event.description ?: "(none)"}")
         println("Type:        ${event.type}")

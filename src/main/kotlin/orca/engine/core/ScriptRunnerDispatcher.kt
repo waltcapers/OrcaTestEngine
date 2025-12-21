@@ -165,7 +165,7 @@ class ScriptRunnerDispatcher(
         // 2) Choose the correct ScriptHandler based on language
         // --------------------------------------------------------------------
         val handler: ScriptHandler = when (language) {
-            ScriptLanguage.SHELL   -> shellHandler
+            ScriptLanguage.SHELL   -> shellHandler   // we only support /bin/sh we will need to add csh and bash.
             ScriptLanguage.BATCH   -> batchHandler
             ScriptLanguage.PYTHON  -> pythonHandler
             ScriptLanguage.POWERSHELL -> powershellHandler

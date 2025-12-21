@@ -89,7 +89,7 @@ data class OrcaTestConfig(
      * depends on this seed. Reusing the same seed guarantees repeatable
      * event ordering unless event definitions change.
      */
-    val randomSeed: Long,
+    var randomSeed: Long,
 
     /**
      * Global run mode for the engine.

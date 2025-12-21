@@ -147,30 +147,51 @@ OrcaTestEngine/
 
 
 ---
+## Building the ORCA Installer
 
-## ▶️ Running the Engine
 
 ### 1. Clone
 ```text
 git clone https://github.com/waltcapers/OrcaTestEngine.git
 
 ```
-
-
-
-### 2. Add config
-
-Place your stress-config.json in the project root.
-
-### 3. Run
-
+### 2. Building an Installer
 ```text
-./gradlew run
+After building the project
+
+On MACOS
+cd packaging/macos
+./build-mac.sh
+
+On WINDOWS
+cd packaging/windows
+./build-win.cmd
+```
+## ▶️ Installing the Engine
+
+
+### MACOSX
+#### 1. Open Orca1.0.dmg
+#### 2. Drag Orca.app into Applications folder
+#### 3. To set up Orca to run as a standard CLI, execute the following
+```text
+sudo ln -s /Applications/Orca.aap/Contents/MacOS/orca /usr/local/bin/orca
+```
+#### 4. Verify installation by running "orca --help" from a terminal window
+#### 5. If MACOSX blocks execution because app is unsigned, run:
+```text
+xattr -dr com.apple.quarantine /Applications/Orca.app
 ```
 
-### 4. Replay failures
 
-engine.replay()
+### WINDOWS
+#### 1. Install Windows version using Orca1.0.exe installer
+#### 2. Install with default options
+By default, Orca is installed to:
+```text
+C:\Program Files\Orca
+```
+#### 3. Add C:\Program Files\Orca to your file path
 
 ## Minimal Example Config
 

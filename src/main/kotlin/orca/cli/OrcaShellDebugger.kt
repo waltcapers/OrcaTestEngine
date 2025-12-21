@@ -2,6 +2,7 @@ package orca.cli
 
 import MockScriptRunner
 import orca.cli.history.HistoryManager
+import orca.cli.util.Ansi
 import orca.engine.config.JsonSchemaValidator
 import orca.engine.config.OrcaConfigLoader
 import orca.engine.core.OrcaEngine
@@ -27,7 +28,7 @@ import java.io.File
  *   event <id>      Run one event by ID
  *   run             Run full engine loop
  *   step            Run exactly one iteration of the engine
- *   debug on|off    Toggle debug logging in config
+ *   verbose on|off    Toggle debug logging in config
  *   summary         Print engine summary
  *   state           Print engine key-value state
  *   help            Show commands
@@ -79,9 +80,10 @@ class OrcaShellDebugger {
             "event"    -> { cmdEvent(args); true }
             "run"      -> { cmdRun(args); true }
             "step"     -> { cmdStep(); true }
-            "debug"    -> { cmdDebug(args); true }
+            "verbose"  -> { cmdDebug(args); true }
             "summary"  -> { cmdSummary(); true }
             "state"    -> { cmdState(); true }
+            "explain"  -> { cmdExplain(args); true}
             "help"     -> { cmdHelp(); true }
             "exit", "quit" -> false
             else -> {
@@ -211,7 +213,21 @@ class OrcaShellDebugger {
         val ok = e.runOnce()
         println("Step result: ${if (ok) "✓ success" else "✗ failure"}")
     }
+    private fun cmdExplain(args: List<String>){
+        if (args.isEmpty()) {
+            println("Usage: explain <id>")
+            return
+        }
+        val cfg = config ?: return println("No configuration loaded.")
 
+        val event = cfg.events.find { it.id == args[0] }
+            if (event == null) {
+                println("❌ Event not found: $args[0]")
+                return
+            }
+
+        ExplainEventCommand.printDetailed(event)
+    }
     // ---------------------------------------------------------
     // debug on/off
     // ---------------------------------------------------------
@@ -252,21 +268,24 @@ class OrcaShellDebugger {
     // help
     // ---------------------------------------------------------
     private fun cmdHelp() {
+
+
         println(
             """
 Available Commands:
 
-  load <file>       Load a config file
-  validate          Validate JSON schema
-  events            List all events
-  event <id>        Run a single event by ID
-  run             Run the engine loop
-  step              Run exactly one engine iteration
-  debug on|off      Toggle config.debug
-  state             Show engine state variables
-  summary           Show final summary
-  help              Show this list
-  exit              Quit shell
+  load <file> [--mock] Load a config file
+  validate             Validate JSON schema
+  events               List all events
+  event <id>           Run a single event by ID
+  run                  Run the engine loop
+  step                 Run exactly one engine iteration
+  verbose on|off       Toggle config.debug
+  state                Show engine state variables
+  explain <id>         Explain an event
+  summary              Show final summary
+  help                 Show this list
+  exit                 Quit debug-shell
 """.trimIndent()
         )
     }

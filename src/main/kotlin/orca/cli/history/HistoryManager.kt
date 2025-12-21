@@ -146,4 +146,21 @@ class HistoryManager(
 
         return input
     }
+
+    // ---------------------------------------------------------------------
+    // Clear history
+    // ---------------------------------------------------------------------
+
+    @Synchronized
+    fun clear() {
+        history.clear()
+
+        try {
+            if (Files.exists(historyFile)) {
+                Files.delete(historyFile)
+            }
+        } catch (e: Exception) {
+            println("Warning: could not clear history: ${e.message}")
+        }
+    }
 }
