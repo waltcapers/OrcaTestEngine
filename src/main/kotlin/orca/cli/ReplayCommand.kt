@@ -40,10 +40,8 @@
 package orca.cli
 
 import orca.engine.config.OrcaConfigLoader
-import orca.engine.core.OrcaEngine
 import orca.engine.core.OrcaEngineFactory
 import orca.engine.logging.ConsoleEngineLogger
-import orca.engine.system.DefaultSystemInspector
 import java.io.File
 
 /**

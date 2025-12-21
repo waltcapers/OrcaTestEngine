@@ -39,7 +39,6 @@
 
 package orca.cli
 
-import orca.engine.logging.ConsoleEngineLogger
 import orca.engine.logging.LoggerProvider
 import orca.engine.system.AdbSystemInspector
 import orca.engine.system.DefaultAdbExecutor
